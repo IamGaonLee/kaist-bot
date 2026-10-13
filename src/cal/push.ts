@@ -59,7 +59,7 @@ const descBody = (d: string | undefined) => (d ?? '').split('\n').filter(l => !l
 
 const sameContent = (a: GEvent, b: GEvent) =>
   a.summary === b.summary && descBody(a.description) === descBody(b.description)
-  && Date.parse(a.start.dateTime) === Date.parse(b.start.dateTime) && Date.parse(a.end.dateTime) === Date.parse(b.end.dateTime)
+  && Date.parse(a.start.dateTime ?? '') === Date.parse(b.start.dateTime ?? '') && Date.parse(a.end.dateTime ?? '') === Date.parse(b.end.dateTime ?? '')
   && reminderKey(a) === reminderKey(b);
 
 /** 구글은 알림 순서를 임의로 바꿔 돌려준다 → 정렬해서 비교 */

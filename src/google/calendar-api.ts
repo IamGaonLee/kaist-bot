@@ -8,8 +8,11 @@ export interface GEvent {
   id?: string;
   summary: string;
   description?: string;
-  start: { dateTime: string; timeZone?: string };
-  end: { dateTime: string; timeZone?: string };
+  /** 시각 일정은 dateTime, 종일 일정은 date(YYYY-MM-DD) */
+  start: { dateTime?: string; date?: string; timeZone?: string };
+  end: { dateTime?: string; date?: string; timeZone?: string };
+  location?: string;
+  colorId?: string;
   reminders?: { useDefault: boolean; overrides?: { method: 'popup' | 'email'; minutes: number }[] };
   extendedProperties?: { private?: Record<string, string> };
   htmlLink?: string;

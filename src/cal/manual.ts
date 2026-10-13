@@ -22,26 +22,63 @@ export function parseKstOrThrow(text: string, what: string): number {
 export interface EventView { id: string; summary: string; startKst: string; endKst: string; kind: 'deadline' | 'manual'; cmid: string | null; link: string | null; description: string }
 
 const toKst = (iso: string) => new Date(Date.parse(iso) + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ');
+/** 종일 일정은 "YYYY-MM-DD 종일" */
+const when = (t: { dateTime?: string; date?: string }) => (t.dateTime ? toKst(t.dateTime) : `${t.date} 종일`);
 const view = (e: GEvent): EventView => ({
-  id: e.id!, summary: e.summary, startKst: toKst(e.start.dateTime), endKst: toKst(e.end.dateTime),
+  id: e.id!, summary: e.summary, startKst: when(e.start), endKst: when(e.end),
   kind: e.extendedProperties?.private?.kaistCmid ? 'deadline' : 'manual', cmid: e.extendedProperties?.private?.kaistCmid ?? null,
   link: e.htmlLink ?? null, description: e.description ?? '',
 });
 
 export async function listEvents(fromSec: number, toSec: number): Promise<EventView[]> {
   const evs = await gcal.listEvents(calendarId(), { timeMin: new Date(fromSec * 1000).toISOString(), timeMax: new Date(toSec * 1000).toISOString(), orderBy: 'startTime' });
-  return evs.filter(e => e.start?.dateTime).map(view);
+  return evs.filter(e => e.start?.dateTime || e.start?.date).map(view);
 }
 
-export async function addEvent(o: { title: string; start: number; end: number; description?: string }): Promise<EventView> {
-  if (o.end <= o.start) throw new KaistError('BAD_TIME', '끝 시각이 시작 시각보다 뒤여야 합니다.');
+export interface AddOptions {
+  title: string;
+  /** 시각 일정: 유닉스 초 / 종일 일정: allDay에 "YYYY-MM-DD" */
+  start?: number;
+  end?: number;
+  allDay?: string;
+  description?: string;
+  location?: string;
+  /** 알림 (분, 일정 시작 기준). 생략하면 캘린더 기본값 */
+  remindMinutes?: number[];
+  colorId?: string;
+  kind?: string;
+}
+
+export async function addEvent(o: AddOptions): Promise<EventView> {
+  let start: GEvent['start'];
+  let end: GEvent['end'];
+  if (o.allDay) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(o.allDay)) throw new KaistError('BAD_TIME', `종일 일정 날짜는 YYYY-MM-DD여야 합니다: "${o.allDay}"`);
+    const next = new Date(Date.parse(o.allDay + 'T00:00:00Z') + 86400e3).toISOString().slice(0, 10);
+    start = { date: o.allDay };
+    end = { date: next };
+  } else {
+    if (o.start === undefined || o.end === undefined || o.end <= o.start) throw new KaistError('BAD_TIME', '끝 시각이 시작 시각보다 뒤여야 합니다.');
+    start = { dateTime: new Date(o.start * 1000).toISOString(), timeZone: 'Asia/Seoul' };
+    end = { dateTime: new Date(o.end * 1000).toISOString(), timeZone: 'Asia/Seoul' };
+  }
   const ev = await gcal.insertEvent(calendarId(), {
-    summary: o.title, description: o.description ?? '',
-    start: { dateTime: new Date(o.start * 1000).toISOString(), timeZone: 'Asia/Seoul' },
-    end: { dateTime: new Date(o.end * 1000).toISOString(), timeZone: 'Asia/Seoul' },
-    extendedProperties: { private: { kaistManual: '1' } },
+    summary: o.title, description: o.description ?? '', start, end,
+    ...(o.location ? { location: o.location } : {}),
+    ...(o.colorId ? { colorId: o.colorId } : {}),
+    ...(o.remindMinutes ? { reminders: { useDefault: false, overrides: o.remindMinutes.map(m => ({ method: 'popup' as const, minutes: m })) } } : {}),
+    extendedProperties: { private: { kaistManual: '1', ...(o.kind ? { kaistKind: o.kind } : {}) } },
   });
   return view(ev);
+}
+
+/** "7d,1d,2h,30m" → 분 목록 */
+export function parseReminders(text: string): number[] {
+  return text.split(',').map(s => s.trim()).filter(Boolean).map(s => {
+    const m = s.match(/^(\d+)\s*([dhm])$/i);
+    if (!m) throw new KaistError('BAD_REMINDER', `알림 형식이 잘못됐습니다: "${s}" (예: 7d,1d,2h)`);
+    return +m[1]! * ({ d: 1440, h: 60, m: 1 } as const)[m[2]!.toLowerCase() as 'd' | 'h' | 'm'];
+  });
 }
 
 export async function getEvent(id: string): Promise<EventView> {

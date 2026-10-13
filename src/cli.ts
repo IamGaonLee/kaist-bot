@@ -12,7 +12,7 @@ import { runDoctor } from './sync/doctor.js';
 import { matchCourse, runSync, type SyncResult } from './sync/sync.js';
 import { formatKst, nowSec, parseDuration } from './util/time.js';
 import { ensureCalendar, pushDeadlines } from './cal/push.js';
-import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, updateEvent } from './cal/manual.js';
+import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, parseReminders, updateEvent } from './cal/manual.js';
 import { googleLogin } from './google/oauth.js';
 
 const program = new Command();
@@ -284,22 +284,31 @@ cal.command('list')
     const to = opts.to ? parseKstOrThrow(opts.to, '--to') + (opts.to.length === 10 ? 86400 : 0) : from + 14 * 86400;
     const events = await listEvents(from, to);
     output(opts.json, { events }, d => [`KLMS 캘린더 일정 ${d.events.length}개`,
-      ...d.events.map(e => `  ${e.startKst}~${e.endKst.slice(11)}  ${e.summary}${e.kind === 'manual' ? '  (직접 추가)' : ''}  [id ${e.id}]`)].join('\n'));
+      ...d.events.map(e => `  ${e.startKst.endsWith('종일') ? e.startKst.padEnd(16) : `${e.startKst}~${e.endKst.slice(11)}`}  ${e.summary}${e.kind === 'manual' ? '  (직접 추가)' : ''}  [id ${e.id}]`)].join('\n'));
   }));
 
 cal.command('add')
   .description('KLMS 캘린더에 일정 직접 추가 (예: 과제 작업 시간)')
   .requiredOption('--title <제목>', '일정 제목')
-  .requiredOption('--start <시각>', '"YYYY-MM-DD HH:MM" (KST)')
+  .option('--start <시각>', '"YYYY-MM-DD HH:MM" (KST)')
   .option('--end <시각>', '"YYYY-MM-DD HH:MM" (KST)')
   .option('--minutes <분>', '--end 대신 길이', '60')
+  .option('--all-day <날짜>', '종일 일정 (YYYY-MM-DD), --start 대신')
+  .option('--location <장소>', '장소')
+  .option('--remind <목록>', '알림, 예: 7d,1d (일정 시작 기준)')
+  .option('--color <id>', '구글 캘린더 색 번호 1~11 (11=빨강)')
+  .option('--kind <종류>', 'exam | no_class | online | makeup | task 등 (기록용)')
   .option('--desc <설명>', '설명')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { title: string; start: string; end?: string; minutes: string; desc?: string; json?: boolean }) => {
-    const start = parseKstOrThrow(opts.start, '--start');
-    const end = opts.end ? parseKstOrThrow(opts.end, '--end') : start + Number(opts.minutes) * 60;
-    const e = await addEvent({ title: opts.title, start, end, description: opts.desc });
-    output(opts.json, { event: e }, d => `추가했습니다: ${d.event.startKst}~${d.event.endKst.slice(11)} ${d.event.summary} [id ${d.event.id}]`);
+  .action(run(async (opts: { title: string; start?: string; end?: string; minutes: string; allDay?: string; location?: string; remind?: string; color?: string; kind?: string; desc?: string; json?: boolean }) => {
+    if (!opts.allDay && !opts.start) throw new KaistError('BAD_TIME', '--start 또는 --all-day 중 하나가 필요합니다.');
+    const start = opts.start ? parseKstOrThrow(opts.start, '--start') : undefined;
+    const end = start === undefined ? undefined : opts.end ? parseKstOrThrow(opts.end, '--end') : start + Number(opts.minutes) * 60;
+    const e = await addEvent({
+      title: opts.title, start, end, allDay: opts.allDay, description: opts.desc, location: opts.location,
+      remindMinutes: opts.remind ? parseReminders(opts.remind) : undefined, colorId: opts.color, kind: opts.kind,
+    });
+    output(opts.json, { event: e }, d => `추가했습니다: ${d.event.startKst}${d.event.startKst.endsWith('종일') ? '' : '~' + d.event.endKst.slice(11)} ${d.event.summary} [id ${d.event.id}]`);
   }));
 
 cal.command('update')
