@@ -15,7 +15,7 @@ export const SEL = {
     moduleEndDt: 'strong.end-dt',
     moduleStatus: 'strong.status',
     labelContent: '.contentwithoutlink',
-    userId: '[data-user-id]',
+    userId: '[data-region="view-contacts"][data-user-id]', // 본인 메시지 창 (S4 리뷰에서 확인)
   },
   assign: {
     title: 'div[role="main"] > h2',

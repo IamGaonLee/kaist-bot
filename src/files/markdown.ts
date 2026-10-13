@@ -6,7 +6,8 @@ import TurndownService from 'turndown';
 import { ensureDir } from '../config.js';
 import { openDb } from '../store/db.js';
 import { formatKst, nowSec } from '../util/time.js';
-import { assignmentDir, courseDir, semesterDir } from './layout.js';
+import { courseDir, semesterDir } from './layout.js';
+import { taskFolder } from './download.js';
 
 const td = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
 const toMd = (html: string | null) => (html ? td.turndown(html).replace(/\n{3,}/g, '\n\n').trim() : '');
@@ -52,7 +53,7 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
     else {
       L.push('| 마감 (KST) | 과제 | 제출 | 비고 |', '|---|---|---|---|');
       for (const t of tasks) {
-        const adir = assignmentDir(cdir, t.name);
+        const adir = taskFolder(cdir, cid, t.cmid, t.name);
         const note = [t.needs_review ? `⚠ 확인 필요: ${t.review_reason}` : '', t.due_source === 'html' ? '마감은 과목 페이지 기준' : '', t.modname === 'quiz' ? '퀴즈' : ''].filter(Boolean).join('; ');
         const nameCell = t.modname === 'assign' ? `[${cell(t.name)}](${rel(cdir, path.join(adir, '설명.md'))})` : cell(t.name);
         L.push(`| ${t.due ? formatKst(t.due) : '-'} | ${nameCell} | ${t.modname === 'assign' ? submissionLabel(t.submission_code, t.submission_text) : '-'} | ${cell(note)} |`);
@@ -65,7 +66,7 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
             A.push('## 첨부', '');
             for (const a of atts) {
               const f = files.get(`a:${t.cmid}:${a.filename}`);
-              A.push(f?.status === 'ok' && f.local_path ? `- [${a.filename}](${encodeURIComponent(path.basename(f.local_path))})` : `- ${a.filename} (아직 받지 않음)`);
+              A.push(f?.local_path && fs.existsSync(f.local_path) ? `- [${a.filename}](${encodeURIComponent(path.basename(f.local_path))})` : `- ${a.filename} (아직 받지 않음)`);
             }
           }
           write(path.join(adir, '설명.md'), A.join('\n'));
@@ -87,7 +88,7 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
       for (const m of ms) {
         if (m.modname === 'resource') {
           const f = files.get(`r:${m.cmid}`);
-          L.push(f?.status === 'ok' && f.local_path ? `- 자료: [${m.name}](${rel(cdir, f.local_path)})`
+          L.push(f?.local_path && fs.existsSync(f.local_path) ? `- 자료: [${m.name}](${rel(cdir, f.local_path)})`
             : f?.status === 'viewer_only' ? `- 자료: ${m.name} (뷰어 전용, KLMS에서 보기: ${m.url ?? ''})` : `- 자료: ${m.name} (아직 받지 않음)`);
         } else if (m.modname === 'lti') L.push(`- 영상: ${m.name} — ${m.url}`);
         else if (m.modname === 'url') L.push(`- 링크: ${m.name} — ${m.url}`);
@@ -109,7 +110,7 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
       const atts = JSON.parse(n.attachments_json ?? '[]') as { filename: string }[];
       for (const a of atts) {
         const f = files.get(`n:${n.bwid}:${a.filename}`);
-        L.push(f?.status === 'ok' && f.local_path ? `- 첨부: [${a.filename}](${rel(cdir, f.local_path)})` : `- 첨부: ${a.filename} (아직 받지 않음)`);
+        L.push(f?.local_path && fs.existsSync(f.local_path) ? `- 첨부: [${a.filename}](${rel(cdir, f.local_path)})` : `- 첨부: ${a.filename} (아직 받지 않음)`);
       }
       if (atts.length) L.push('');
     }

@@ -2,9 +2,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadSettings } from '../config.js';
-import { BlockedError, KaistError, SessionExpiredError } from '../errors.js';
+import { BlockedError, KaistError, NotAvailableError, SessionExpiredError } from '../errors.js';
 import { collectCandidates, executeDownloads, planFiles, recordPlan } from '../files/download.js';
 import { writeMarkdown } from '../files/markdown.js';
+import { pushDeadlines, type PushResult } from '../cal/push.js';
+import { hasGoogleToken } from '../google/oauth.js';
 import { parseAssignPage } from '../klms/adapters/assign-page.js';
 import { parseCoursePage, type ParsedModule } from '../klms/adapters/course-page.js';
 import { parseArticle, parseBoardList } from '../klms/adapters/courseboard.js';
@@ -14,8 +16,9 @@ import { ensureSession, type KlmsSession } from '../klms/session.js';
 import { saveCourses } from '../store/courses-cache.js';
 import { getMeta, openDb, setMeta, tx } from '../store/db.js';
 import { saveSnapshot, sha1 } from '../store/snapshots.js';
+import { acquireSyncLock } from '../store/lock.js';
 import { nowSec } from '../util/time.js';
-import { resolveDeadline } from './deadlines.js';
+import { resolveDeadline, type Deadline } from './deadlines.js';
 import { checkCoursePage, HANDLED, InvariantError } from './invariants.js';
 
 /** 과제 페이지를 다시 받는 기준: 마감이 이 시간 이내로 지났거나 앞으로인 과제 */
@@ -54,6 +57,7 @@ export interface FileStage {
 export interface SyncResult {
   runId: number;
   files?: FileStage;
+  calendar?: PushResult;
   startedAt: string;
   finishedAt: string;
   status: 'ok' | 'partial' | 'aborted';
@@ -73,6 +77,8 @@ export interface SyncOptions {
   files?: boolean;
   /** 첫 전체 다운로드를 승인 */
   confirmDownload?: boolean;
+  /** false면 구글 캘린더 반영 생략 */
+  calendar?: boolean;
   onStatus?: (m: string) => void;
 }
 
@@ -85,6 +91,15 @@ export function matchCourse(c: Course, q: string): boolean {
 }
 
 export async function runSync(opts: SyncOptions): Promise<SyncResult> {
+  const release = acquireSyncLock();
+  try {
+    return await runSyncLocked(opts);
+  } finally {
+    release();
+  }
+}
+
+async function runSyncLocked(opts: SyncOptions): Promise<SyncResult> {
   const log = opts.onStatus ?? (() => {});
   const db = openDb();
   const startedAt = iso();
@@ -137,6 +152,16 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     // 파일 다운로드와 드라이브 요약 (S3)
     const okIds = result.courses.filter(c => c.ok).map(c => c.id);
     if (opts.files !== false && okIds.length) result.files = await fileStage(session, semester.label, okIds, runId, opts, result);
+
+    // 구글 캘린더 반영 (S4). 실패해도 수집 결과는 유지하고 경고로 알린다
+    if (opts.calendar !== false) {
+      if (!hasGoogleToken()) result.warnings.push('구글 캘린더가 연결되지 않아 마감 반영을 건너뛰었습니다 (`kaist cal login`).');
+      else {
+        log('구글 캘린더 반영 중...');
+        try { result.calendar = await pushDeadlines(new Date().toISOString()); }
+        catch (e) { result.warnings.push(`구글 캘린더 반영 실패: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+    }
   } catch (e) {
     result.status = 'aborted';
     const err = e instanceof KaistError ? e : new KaistError('INTERNAL', e instanceof Error ? e.message : String(e));
@@ -180,7 +205,8 @@ async function fileStage(session: KlmsSession, semesterLabel: string, courseIds:
     unavailable: plan.filter(p => p.action === 'unavailable').map(p => ({ file: p.cand.filename, reason: p.reason })),
     markdownWritten: 0,
   };
-  for (const p of plan.filter(x => x.action === 'unavailable')) {
+  // "받지 않음"은 상태가 바뀌었을 때만 변경으로 기록 (매 sync 반복 방지)
+  for (const p of plan.filter(x => x.action === 'unavailable' && x.prevStatus !== x.head?.status)) {
     result.changes.push({ courseId: p.cand.courseId, kind: 'module', ref: p.cand.ref, change: 'changed', title: p.cand.filename, detail: `받지 않음: ${p.reason}` });
   }
 
@@ -233,7 +259,6 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
 
   // 섹션과 활동
   const prevMods = new Map((db.prepare('select cmid, content_hash, updates_sig, removed_at from modules where course_id = ?').all(course.id) as { cmid: number; content_hash: string; updates_sig: string | null; removed_at: string | null }[]).map(r => [r.cmid, r]));
-  const changedByUpdates = new Set<number>();
   tx(() => {
     db.prepare('delete from sections where course_id = ?').run(course.id);
     const insSec = db.prepare('insert into sections(course_id, number, name, date_range, summary) values(?, ?, ?, ?, ?)');
@@ -250,7 +275,6 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
       const prev = prevMods.get(m.cmid);
       if (!prev || prev.removed_at) push({ kind: 'module', ref: m.cmid, change: 'new', title: m.name || m.modname, detail: m.modname });
       else if (prev.content_hash !== hash) push({ kind: 'module', ref: m.cmid, change: 'changed', title: m.name || m.modname, detail: m.modname });
-      if (prev && sig !== prev.updates_sig) changedByUpdates.add(m.cmid);
       upMod.run(m.cmid, course.id, m.section, m.modname, m.name, m.url, m.file?.url ?? null, m.file?.filename ?? null, m.endDtText, m.status, m.boardKind, m.text, sig, hash, now, now);
     }
     const present = new Set(page.modules.map(m => m.cmid));
@@ -271,20 +295,32 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
     const prev = db.prepare('select * from tasks where cmid = ?').get(m.cmid) as Record<string, unknown> | undefined;
     const prevDue = (prev?.due as number | null) ?? null;
     let parsed: ReturnType<typeof parseAssignPage> | null = null;
-    if (m.modname === 'assign') {
-      const needPage = !prev || !prev.page_fetched_at || changedByUpdates.has(m.cmid) || prevDue === null || prevDue >= t - ACTIVE_WINDOW_SEC;
+    const sig = updSig.get(m.cmid) ?? null;
+    // 링크가 없는 활동(조건부 공개 등)은 페이지를 열지 않는다
+    if (m.modname === 'assign' && m.url) {
+      // 변경 신호는 과제 페이지를 성공적으로 처리했을 때의 서명(page_sig)과 비교한다 — 실패해도 다음에 다시 시도
+      const needPage = !prev || !prev.page_fetched_at || prev.page_sig !== sig || prevDue === null || prevDue >= t - ACTIVE_WINDOW_SEC;
       if (needPage) {
-        const ah = await session.http.html(`/mod/assign/view.php?id=${m.cmid}`);
-        saveSnapshot(`assign-${m.cmid}`, ah);
-        parsed = parseAssignPage(ah, `${course.code} 과제 "${m.name}" (cmid ${m.cmid})`);
-        pagesFetched++;
+        try {
+          const ah = await session.http.html(`/mod/assign/view.php?id=${m.cmid}`);
+          saveSnapshot(`assign-${m.cmid}`, ah);
+          parsed = parseAssignPage(ah, `${course.code} 과제 "${m.name}" (cmid ${m.cmid})`);
+          pagesFetched++;
+        } catch (e) {
+          if (!(e instanceof NotAvailableError)) throw e;
+          result.warnings.push(`${course.code} 과제 "${m.name}": 페이지를 열 수 없어 건너뜀 (조건부 공개일 수 있음)`);
+        }
       }
     }
     const pageDue = parsed ? parsed.due : ((prev?.page_due as number | null) ?? null);
     const evs = eventsByCmid.get(m.cmid) ?? [];
-    const dl = resolveDeadline({ cmid: m.cmid, modname: m.modname, htmlEnd: m.endDt?.end ?? null, pageDue, events: evs, myUserId: page.userId });
+    let dl = resolveDeadline({ cmid: m.cmid, modname: m.modname, htmlEnd: m.endDt?.end ?? null, pageDue, events: evs, myUserId: page.userId });
+    // 마감을 하나로 정하지 못했으면(needs_review) 이전 값을 지우지 않고 유지한다 — 캘린더 일정이 "사라짐"으로 바뀌지 않게
+    if (dl.due === null && dl.needsReview && prevDue !== null) dl = { ...dl, due: prevDue, source: (prev?.due_source as Deadline['source']) ?? 'calendar' };
     const openAt = m.modname === 'quiz' ? (evs.find(e => e.eventtype === 'open')?.timestart ?? m.endDt?.start ?? null) : (m.endDt?.start ?? null);
-    const introHash = parsed ? sha1(parsed.introHtml, JSON.stringify(parsed.attachments)) : ((prev?.intro_hash as string | null) ?? null);
+    // 설명 영역(#intro)이 없으면 설명·첨부는 기존 값을 유지한다
+    const hasIntro = !!parsed && (parsed.introHtml !== null || parsed.attachments.length > 0);
+    const introHash = hasIntro ? sha1(parsed!.introHtml, JSON.stringify(parsed!.attachments)) : ((prev?.intro_hash as string | null) ?? null);
 
     if (!prev) push({ kind: 'task', ref: m.cmid, change: 'new', title: m.name, detail: m.modname });
     else {
@@ -295,8 +331,8 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
     if (dl.needsReview && !(prev?.needs_review)) push({ kind: 'task', ref: m.cmid, change: 'needs_review', title: m.name, detail: dl.reason ?? undefined });
 
     db.prepare(`insert into tasks(cmid, course_id, modname, name, due, due_source, html_end, page_due, open_at, needs_review, review_reason, calendar_event_id,
-        submission_code, submission_text, grading_code, grading_text, last_modified_text, intro_html, intro_hash, attachments_json, page_fetched_at, updated_at)
-      values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        submission_code, submission_text, grading_code, grading_text, last_modified_text, intro_html, intro_hash, attachments_json, page_fetched_at, updated_at, page_sig)
+      values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict(cmid) do update set course_id=excluded.course_id, modname=excluded.modname, name=excluded.name, due=excluded.due, due_source=excluded.due_source,
         html_end=excluded.html_end, page_due=excluded.page_due, open_at=excluded.open_at, needs_review=excluded.needs_review, review_reason=excluded.review_reason,
         calendar_event_id=excluded.calendar_event_id,
@@ -304,10 +340,11 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
         grading_code=coalesce(excluded.grading_code, tasks.grading_code), grading_text=coalesce(excluded.grading_text, tasks.grading_text),
         last_modified_text=coalesce(excluded.last_modified_text, tasks.last_modified_text), intro_html=coalesce(excluded.intro_html, tasks.intro_html),
         intro_hash=coalesce(excluded.intro_hash, tasks.intro_hash), attachments_json=coalesce(excluded.attachments_json, tasks.attachments_json),
-        page_fetched_at=coalesce(excluded.page_fetched_at, tasks.page_fetched_at), updated_at=excluded.updated_at`)
+        page_fetched_at=coalesce(excluded.page_fetched_at, tasks.page_fetched_at), updated_at=excluded.updated_at,
+        page_sig=case when excluded.page_fetched_at is not null then excluded.page_sig else tasks.page_sig end`)
       .run(m.cmid, course.id, m.modname, m.name, dl.due, dl.source, m.endDt?.end ?? null, pageDue, openAt, dl.needsReview ? 1 : 0, dl.reason, dl.calendarEventId,
         parsed?.submissionCode ?? null, parsed?.submissionText ?? null, parsed?.gradingCode ?? null, parsed?.gradingText ?? null, parsed?.lastModifiedText ?? null,
-        parsed?.introHtml ?? null, parsed ? introHash : null, parsed ? JSON.stringify(parsed.attachments) : null, parsed ? now : null, now);
+        hasIntro ? parsed!.introHtml : null, hasIntro ? introHash : null, hasIntro ? JSON.stringify(parsed!.attachments) : null, parsed ? now : null, now, parsed ? sig : null);
   }
 
   // 게시판: 목록 1쪽부터, 모르는 글만 본문을 받는다. 1쪽이 전부 새 글이면 다음 쪽으로
@@ -319,7 +356,14 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
     const seenThisRun = new Set<number>();
     let pageNo = 1;
     for (;;) {
-      const lh = await session.http.html(`/mod/courseboard/view.php?id=${b.cmid}${pageNo > 1 ? `&page=${pageNo}` : ''}`);
+      let lh: string;
+      try {
+        lh = await session.http.html(`/mod/courseboard/view.php?id=${b.cmid}${pageNo > 1 ? `&page=${pageNo}` : ''}`);
+      } catch (e) {
+        if (!(e instanceof NotAvailableError)) throw e;
+        result.warnings.push(`${course.code} 게시판 "${b.name}": 열 수 없어 건너뜀`);
+        break;
+      }
       if (pageNo === 1) saveSnapshot(`board-${b.cmid}`, lh);
       const list = parseBoardList(lh, `${course.code} 게시판 "${b.name}" ${pageNo}쪽`);
       listPages++;
@@ -328,7 +372,14 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
       for (const p of list.posts) seenThisRun.add(p.bwid);
       const fresh = unseen.filter(p => !known.has(p.bwid));
       for (const p of fresh) {
-        const ah = await session.http.html(p.url);
+        let ah: string;
+        try {
+          ah = await session.http.html(p.url);
+        } catch (e) {
+          if (!(e instanceof NotAvailableError)) throw e;
+          result.warnings.push(`${course.code} 게시판 글 "${p.title}": 열 수 없어 건너뜀 (비밀글일 수 있음)`);
+          continue;
+        }
         const art = parseArticle(ah, `${course.code} 게시판 글 (bwid ${p.bwid})`);
         articles++;
         db.prepare(`insert into notices(bwid, board_cmid, course_id, board_kind, title, author, list_date, posted_at, posted_text, body_html, body_hash, has_attachment, attachments_json, first_seen_at, updated_at)
@@ -339,8 +390,10 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
         known.add(p.bwid);
         push({ kind: 'notice', ref: p.bwid, change: 'new', title: art.title, detail: b.boardKind ?? 'board' });
       }
-      const allFresh = unseen.length > 0 && unseen.every(p => !knownBefore.has(p.bwid));
-      if (!allFresh || pageNo >= list.maxPage || pageNo >= MAX_BOARD_PAGES) break;
+      // 이 쪽의 마지막 글(고정 글 제외, 가장 오래된 글)이 새 글이면 다음 쪽에도 새 글이 있을 수 있다
+      const last = unseen.at(-1);
+      const mayContinue = !!last && !knownBefore.has(last.bwid);
+      if (!mayContinue || pageNo >= list.maxPage || pageNo >= MAX_BOARD_PAGES) break;
       pageNo++;
     }
     const count = (db.prepare('select count(*) n from notices where board_cmid = ?').get(b.cmid) as { n: number }).n;

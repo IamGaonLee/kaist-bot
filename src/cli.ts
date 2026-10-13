@@ -10,7 +10,10 @@ import { getMeta } from './store/db.js';
 import { listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
 import { runDoctor } from './sync/doctor.js';
 import { matchCourse, runSync, type SyncResult } from './sync/sync.js';
-import { nowSec, parseDuration } from './util/time.js';
+import { formatKst, nowSec, parseDuration } from './util/time.js';
+import { ensureCalendar, pushDeadlines } from './cal/push.js';
+import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, updateEvent } from './cal/manual.js';
+import { googleLogin } from './google/oauth.js';
 
 const program = new Command();
 program.name('kaist').description('KAIST KLMS 수집 CLI (읽기 전용)');
@@ -162,6 +165,12 @@ function syncText(r: SyncResult): string {
     }
     lines.push(`  드라이브 요약 md ${f.markdownWritten}개 갱신`);
   }
+  if (r.calendar) {
+    const c = r.calendar;
+    lines.push(`캘린더 "KLMS": 새 일정 ${c.created.length}, 수정 ${c.updated.length}, 수집 시각만 갱신 ${c.refreshed}`);
+    for (const s of [...c.created.map(x => `+ ${x}`), ...c.updated.map(x => `~ ${x}`)].slice(0, 20)) lines.push(`  ${s}`);
+    for (const s of c.skippedReview) lines.push(`  ⚠ 마감 확인 필요라 등록 안 함: ${s}`);
+  }
   if (Object.keys(r.unprocessed).length) lines.push(`처리하지 못한 활동 유형: ${Object.entries(r.unprocessed).map(([k, v]) => `${k} ${v}개`).join(', ')}`);
   for (const w of r.warnings) lines.push(`경고: ${w}`);
   return lines.join('\n');
@@ -172,10 +181,11 @@ program.command('sync')
   .option('--course <과목>', '특정 과목만 (코드, id, 이름 일부)')
   .option('--no-files', '파일 다운로드와 드라이브 md 생성 건너뛰기')
   .option('--confirm-download', '첫 전체 다운로드 승인 (한 번만)')
+  .option('--no-calendar', '구글 캘린더 반영 생략')
   .option('--no-login', '세션이 만료됐으면 로그인 창을 띄우지 않고 실패')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; login: boolean; json?: boolean }) => {
-    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, onStatus: status });
+  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; calendar: boolean; login: boolean; json?: boolean }) => {
+    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, calendar: opts.calendar, onStatus: status });
     if (opts.json) console.log(JSON.stringify({ ok: r.status === 'ok', ...r }, null, 2));
     else console.log(syncText(r));
     if (r.status === 'aborted') process.exitCode = r.abortReason?.code === 'SESSION_EXPIRED' ? 2 : 1;
@@ -240,6 +250,86 @@ program.command('files')
       `파일 ${d.files.length}개${opts.new ? ' (마지막 sync에서 받음)' : ''}`,
       ...d.files.map(f => `  ${f.course.padEnd(13)} [${f.statusLabel}] ${f.filename}${f.localPath ? `\n      ${f.localPath}` : ''}`),
     ].join('\n'));
+  }));
+
+const cal = program.command('cal').description('구글 "KLMS" 전용 캘린더 (이 CLI가 만든 캘린더만 접근 가능)');
+
+cal.command('login')
+  .description('구글 계정 승인 (브라우저). 범위: 이 앱이 만든 캘린더만')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { json?: boolean }) => {
+    await googleLogin(status);
+    const id = await ensureCalendar();
+    output(opts.json, { calendarId: id }, () => '구글 캘린더를 연결했습니다. "KLMS" 캘린더를 준비했습니다.');
+  }));
+
+cal.command('push')
+  .description('로컬 마감 데이터를 KLMS 캘린더에 반영 (KLMS에 접속하지 않음)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { json?: boolean }) => {
+    requireSynced();
+    const r = await pushDeadlines(getMeta('last_sync_at')!);
+    output(opts.json, r, d => [`KLMS 캘린더: 새 일정 ${d.created.length}, 수정 ${d.updated.length}, 수집 시각만 갱신 ${d.refreshed}`,
+      ...d.created.map(x => `  + ${x}`), ...d.updated.map(x => `  ~ ${x}`), ...d.skippedReview.map(x => `  ⚠ 확인 필요라 등록 안 함: ${x}`)].join('\n'));
+  }));
+
+cal.command('list')
+  .description('KLMS 캘린더 일정 (기본: 오늘부터 14일)')
+  .option('--from <날짜>', 'YYYY-MM-DD 또는 "YYYY-MM-DD HH:MM" (KST)')
+  .option('--to <날짜>', 'YYYY-MM-DD 또는 "YYYY-MM-DD HH:MM" (KST)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { from?: string; to?: string; json?: boolean }) => {
+    const today = parseKstOrThrow(formatKst(nowSec()).slice(0, 10), '오늘');
+    const from = opts.from ? parseKstOrThrow(opts.from, '--from') : today;
+    const to = opts.to ? parseKstOrThrow(opts.to, '--to') + (opts.to.length === 10 ? 86400 : 0) : from + 14 * 86400;
+    const events = await listEvents(from, to);
+    output(opts.json, { events }, d => [`KLMS 캘린더 일정 ${d.events.length}개`,
+      ...d.events.map(e => `  ${e.startKst}~${e.endKst.slice(11)}  ${e.summary}${e.kind === 'manual' ? '  (직접 추가)' : ''}  [id ${e.id}]`)].join('\n'));
+  }));
+
+cal.command('add')
+  .description('KLMS 캘린더에 일정 직접 추가 (예: 과제 작업 시간)')
+  .requiredOption('--title <제목>', '일정 제목')
+  .requiredOption('--start <시각>', '"YYYY-MM-DD HH:MM" (KST)')
+  .option('--end <시각>', '"YYYY-MM-DD HH:MM" (KST)')
+  .option('--minutes <분>', '--end 대신 길이', '60')
+  .option('--desc <설명>', '설명')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { title: string; start: string; end?: string; minutes: string; desc?: string; json?: boolean }) => {
+    const start = parseKstOrThrow(opts.start, '--start');
+    const end = opts.end ? parseKstOrThrow(opts.end, '--end') : start + Number(opts.minutes) * 60;
+    const e = await addEvent({ title: opts.title, start, end, description: opts.desc });
+    output(opts.json, { event: e }, d => `추가했습니다: ${d.event.startKst}~${d.event.endKst.slice(11)} ${d.event.summary} [id ${d.event.id}]`);
+  }));
+
+cal.command('update')
+  .description('KLMS 캘린더 일정 수정 (자동 마감 일정은 제목·설명만)')
+  .argument('<id>', '일정 id (cal list에서 확인)')
+  .option('--title <제목>').option('--start <시각>').option('--end <시각>').option('--desc <설명>')
+  .option('--json', 'JSON 출력')
+  .action(run(async (id: string, opts: { title?: string; start?: string; end?: string; desc?: string; json?: boolean }) => {
+    const e = await updateEvent(id, {
+      title: opts.title, description: opts.desc,
+      start: opts.start ? parseKstOrThrow(opts.start, '--start') : undefined,
+      end: opts.end ? parseKstOrThrow(opts.end, '--end') : undefined,
+    });
+    output(opts.json, { event: e }, d => `수정했습니다: ${d.event.startKst}~${d.event.endKst.slice(11)} ${d.event.summary}`);
+  }));
+
+cal.command('delete')
+  .description('KLMS 캘린더 일정 삭제 (--yes 없으면 대상만 보여주고 멈춤)')
+  .argument('<id>', '일정 id')
+  .option('--yes', '확인했으니 삭제')
+  .option('--json', 'JSON 출력')
+  .action(run(async (id: string, opts: { yes?: boolean; json?: boolean }) => {
+    const e = await getEvent(id);
+    if (!opts.yes) {
+      output(opts.json, { deleted: false, event: e }, d => `삭제 대상: ${d.event.startKst} ${d.event.summary}${d.event.kind === 'deadline' ? ' (자동 마감 일정 — 다음 sync에서 다시 만들어집니다)' : ''}\n삭제하려면 --yes를 붙여 다시 실행하세요.`);
+      process.exitCode = 4;
+      return;
+    }
+    await deleteEvent(id);
+    output(opts.json, { deleted: true, event: e }, d => `삭제했습니다: ${d.event.summary}`);
   }));
 
 program.command('doctor')

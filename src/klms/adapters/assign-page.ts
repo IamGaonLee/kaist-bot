@@ -6,7 +6,8 @@ import { ASSIGN_ROW, SEL } from '../selectors.js';
 
 export interface ParsedAssignPage {
   title: string;
-  introHtml: string;
+  /** #intro가 없으면 null */
+  introHtml: string | null;
   /** 과제 설명 첨부 (제출물 파일은 제외) */
   attachments: { filename: string; url: string }[];
   /** td 클래스의 상태 코드, 예: submitted, new, draft. 없으면 null */
@@ -27,8 +28,9 @@ export function parseAssignPage(html: string, where = '과제 페이지'): Parse
   const title = clean($(SEL.assign.title).first().text());
   if (!title) throw new ParseError(where, '과제 제목(h2)을 찾지 못했습니다');
 
+  // 설명이 없는 과제는 #intro 자체가 없을 수 있다 → null(기존 값 유지)로 두고, 빈 문자열로 덮지 않는다
   const intro = $(SEL.assign.intro).first();
-  const introHtml = (intro.find('.no-overflow').first().html() ?? intro.html() ?? '').trim();
+  const introHtml = intro.length ? (intro.find('.no-overflow').first().html() ?? intro.html() ?? '').trim() : null;
 
   const seen = new Set<string>();
   const attachments: ParsedAssignPage['attachments'] = [];
@@ -45,6 +47,8 @@ export function parseAssignPage(html: string, where = '과제 페이지'): Parse
     const td = $(tr).find('td').first();
     if (th) rows.set(th, { text: clean(td.text()), cls: td.attr('class') ?? '' });
   });
+  // 학생 화면에는 제출 상태 표가 항상 있다. 없으면 마크업 변화로 보고 멈춘다
+  if (rows.size === 0) throw new ParseError(where, '제출 상태 표(.submissionstatustable)를 찾지 못했습니다');
   const row = (names: readonly string[]) => names.map(n => rows.get(n)).find(Boolean) ?? null;
   const sub = row(ASSIGN_ROW.submission);
   const grade = row(ASSIGN_ROW.grading);

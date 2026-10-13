@@ -5,6 +5,7 @@ import { formatKst, parseDashKst, parseDuration, parseEndDt, parseKoreanDateTime
 import { resolveDeadline } from '../src/sync/deadlines.js';
 import { checkCoursePage } from '../src/sync/invariants.js';
 import { monthsCovering, type CalendarEvent } from '../src/klms/calendar.js';
+import { parseListDate } from '../src/klms/adapters/courseboard.js';
 import type { ParsedCoursePage, ParsedModule } from '../src/klms/adapters/course-page.js';
 
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0) => Date.UTC(y, mo - 1, d, h, mi) / 1000;
@@ -77,6 +78,18 @@ test('마감: 그룹 이벤트, 후보가 둘 이상이면 needs_review', () => 
   assert.equal(g.calendarEventId, 2);
   const many = resolveDeadline({ cmid: 100, modname: 'assign', htmlEnd: due, pageDue: null, events: [ev(1, due), ev(2, due + 60)], myUserId: 5 });
   assert.deepEqual([many.due, many.needsReview], [null, true]);
+});
+
+test('마감: 과제 페이지에만 있으면 그 값을 쓰되 needs_review', () => {
+  const d = resolveDeadline({ cmid: 100, modname: 'assign', htmlEnd: null, pageDue: due, events: [], myUserId: 5 });
+  assert.deepEqual([d.due, d.source, d.needsReview], [due, 'page', true]);
+});
+
+test('게시판 목록 날짜: YYYY-MM-DD 또는 오늘의 HH:MM', () => {
+  const now = Date.UTC(2026, 9, 14, 3, 0); // 2026-10-14 12:00 KST
+  assert.equal(parseListDate('2026-10-11', now), utc(2026, 10, 10, 15));
+  assert.equal(parseListDate('09:05', now), utc(2026, 10, 14, 0, 5));
+  assert.equal(parseListDate('어제', now), null);
 });
 
 test('마감: 퀴즈는 close 이벤트', () => {

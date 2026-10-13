@@ -13,6 +13,24 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
   - S3 전까지 Google Drive for desktop 설치
 
+## 에이전트로 쓸 때 (학교생활 논의)
+
+사용자가 과제, 마감, 공지, 강의자료를 물으면 `kaist` CLI를 도구로 쓴다. 항상 `--json`을 붙여 결과를 읽는다.
+
+- **조회는 로컬 데이터로 먼저 답한다.** `kaist status --json`의 `lastSync`로 데이터가 얼마나 오래됐는지 알리고 답한다.
+  - 마감·제출 상태: `kaist assignments --json` (`--due 7d`, `--all`, `--course <코드|이름>`)
+  - 공지: `kaist notices --since 3d --json` (본문이 필요하면 `--body`)
+  - 강의자료: `kaist files --json` (`--new`는 마지막 sync에서 받은 것), 영상 링크: `kaist videos --json`
+  - 캘린더: `kaist cal list --json`
+- **최신화가 필요하면 `kaist sync`를 제안하고, 실행 전에 사용자에게 알린다.** 세션이 만료됐으면 로그인 창이 뜨고 사용자가 비밀번호 입력과 폰 승인을 해야 한다. 세션이 살아 있으면 승인 없이 끝난다. 확인하려면 `kaist status --check`.
+  - 종료 코드 2(`SESSION_EXPIRED`): `--no-login`으로 돌렸는데 세션이 만료된 경우다. 사용자에게 로그인할지 묻는다.
+  - sync 결과의 `changes`(새 과제, 마감 변경, 새 글, 새 자료)를 그대로 브리핑에 쓴다. `needs_review`가 있으면 꼭 알린다(마감 정보가 서로 달라 KLMS에서 직접 확인해야 함).
+- **과제를 같이 풀 때 읽을 파일** (드라이브, `G:\내 드라이브\KAIST\2026-가을\<코드> <과목명>\`):
+  - `과제\<과제명>\설명.md`(설명·마감·첨부 목록)와 같은 폴더의 첨부파일
+  - `강의자료\<주차>\` 원본 파일, `_과목정보.md`(주차 구성, 공지 본문)
+- **캘린더**: 마감은 sync가 자동으로 "KLMS" 캘린더에 넣는다. 작업 일정은 `kaist cal add --title ... --start "YYYY-MM-DD HH:MM" --minutes 90`으로 넣는다. **삭제는 실행 전에 사용자에게 확인**한다(`kaist cal delete <id>`는 `--yes` 없이 대상만 보여준다). CLI는 이 앱이 만든 KLMS 캘린더만 다룰 수 있다.
+- 받은 자료는 사용자 개인 학습용이다. 다른 사람에게 보내거나 공유하는 일은 하지 않는다.
+
 ## 문서 (충돌 시 위가 우선)
 
 1. `docs/handoff-implementation.md`: 확정 결정, 작업 순서 S0~S5, 작업 규칙

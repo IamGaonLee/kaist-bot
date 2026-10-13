@@ -32,6 +32,16 @@ export interface ParsedArticle {
 
 const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
 
+/** 목록 작성일: "YYYY-MM-DD", 또는 오늘 글이 "HH:MM"으로만 나오는 경우 오늘 날짜 */
+export function parseListDate(text: string, now = Date.now()): number | null {
+  const d = parseDashKst(text);
+  if (d !== null) return d;
+  const m = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const today = new Date(now + 9 * 3600e3).toISOString().slice(0, 10);
+  return parseDashKst(`${today} ${m[1]!.padStart(2, '0')}:${m[2]}`);
+}
+
 export function parseBoardList(html: string, where = '게시판 목록'): ParsedBoardList {
   const $ = cheerio.load(html);
   const table = $('table.courseboard_table');
@@ -39,12 +49,13 @@ export function parseBoardList(html: string, where = '게시판 목록'): Parsed
 
   // 머리글 이름으로 열 위치를 찾는다 (번호/제목/작성자/작성일/조회수)
   const headers = table.find('thead th').map((_, th) => clean($(th).text())).get();
-  const col = (names: string[], fallback: number) => {
+  const col = (names: string[]) => {
     const i = headers.findIndex(h => names.includes(h));
-    return i >= 0 ? i : fallback;
+    if (i < 0) throw new ParseError(where, `머리글 "${names[0]}" 열을 찾지 못했습니다 (머리글: ${headers.join('/') || '없음'})`);
+    return i;
   };
-  const cWriter = col(['작성자', 'Writer', 'Author'], 2);
-  const cDate = col(['작성일', 'Date'], 3);
+  const cWriter = col(['작성자', 'Writer', 'Author']);
+  const cDate = col(['작성일', 'Date']);
 
   const posts: BoardListItem[] = [];
   $(SEL.board.rows).each((_, tr) => {
@@ -59,11 +70,13 @@ export function parseBoardList(html: string, where = '게시판 목록'): Parsed
     const bwid = Number(url.match(/[?&]bwid=(\d+)/)?.[1]);
     if (!bwid) throw new ParseError(where, `글 링크에서 bwid를 찾지 못했습니다: ${url}`);
     const dateText = clean(tds.eq(cDate).text());
+    const listDate = parseListDate(dateText);
+    if (listDate === null) throw new ParseError(where, `작성일을 해석하지 못했습니다 (bwid ${bwid}): "${dateText}"`);
     posts.push({
       bwid,
       title: clean(link.text()),
       author: clean(tds.eq(cWriter).text()),
-      listDate: parseDashKst(dateText),
+      listDate,
       hasAttachment: $(tr).find(SEL.board.attachIcon).length > 0,
       url,
     });
@@ -93,6 +106,8 @@ export function parseArticle(html: string, where = '게시판 글'): ParsedArtic
   const title = clean(root.find(SEL.article.subject).first().text());
   if (!title) throw new ParseError(where, '글 제목을 찾지 못했습니다');
   const postedText = labelValue(root.find(SEL.article.date).first().text());
+  const postedAt = parseKoreanDateTime(postedText);
+  if (postedText && postedAt === null) throw new ParseError(where, `작성일시를 해석하지 못했습니다: "${postedText}"`);
   const body = root.find(SEL.article.body).first();
   const seen = new Set<string>();
   const attachments: ParsedArticle['attachments'] = [];
@@ -106,7 +121,7 @@ export function parseArticle(html: string, where = '게시판 글'): ParsedArtic
     title,
     author: labelValue(root.find(SEL.article.writer).first().text()),
     postedText,
-    postedAt: parseKoreanDateTime(postedText),
+    postedAt,
     bodyHtml: (body.length ? body.html() : root.find(SEL.article.bodyFallback).first().html())?.trim() ?? '',
     attachments,
   };

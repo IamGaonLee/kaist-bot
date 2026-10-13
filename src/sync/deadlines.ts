@@ -21,7 +21,7 @@ export interface DeadlineInput {
 
 export interface Deadline {
   due: number | null;
-  source: 'calendar' | 'html' | 'none';
+  source: 'calendar' | 'html' | 'page' | 'none';
   needsReview: boolean;
   reason: string | null;
   calendarEventId: number | null;
@@ -53,6 +53,10 @@ export function resolveDeadline(input: DeadlineInput): Deadline {
     if (input.htmlEnd !== null) {
       const off = input.pageDue !== null && Math.abs(input.pageDue - input.htmlEnd) >= MINUTE;
       return { due: input.htmlEnd, source: 'html', needsReview: off, reason: off ? '과목 페이지 기간과 과제 페이지 마감이 다름' : null, calendarEventId: null };
+    }
+    // 과제 페이지에만 마감이 있다: 조용히 "마감 없음"으로 두지 않고 쓰되 확인을 요청한다
+    if (input.pageDue !== null) {
+      return { due: input.pageDue, source: 'page', needsReview: true, reason: '캘린더와 과목 페이지에 마감이 없어 과제 페이지 값을 사용함', calendarEventId: null };
     }
     return { due: null, source: 'none', needsReview: false, reason: null, calendarEventId: null };
   }

@@ -1,5 +1,5 @@
 // KLMS HTTP 공통 계층: 쿠키, 브라우저 UA, 요청 간격, 동시 2개 이하, 만료 감지 통합.
-import { BlockedError, SessionExpiredError } from '../errors.js';
+import { BlockedError, KaistError, NotAvailableError, SessionExpiredError } from '../errors.js';
 import { KLMS_BASE, USER_AGENT, isLoginRedirect } from './site.js';
 import { applySetCookies, cookieHeaderFor, type SessionFile, type SessionStore } from './session-store.js';
 
@@ -66,6 +66,8 @@ export class KlmsHttp {
   /** 만료·차단이면 예외. 리다이렉트는 따라가지 않는다(만료 감지를 위해). */
   async request(pathOrUrl: string, expect: Expect, init: RequestInit = {}): Promise<Response> {
     const url = new URL(pathOrUrl, KLMS_BASE);
+    // 쿠키는 https로만 보낸다 (HTML에서 뽑은 http:// 링크 대비)
+    if (url.protocol !== 'https:') throw new KaistError('INSECURE_URL', `https가 아닌 주소로는 요청하지 않습니다: ${url.origin}${url.pathname}`);
     this.requestCount++;
     const res = await this.limiter.run(() => fetch(url, {
       ...init,
@@ -89,7 +91,10 @@ export class KlmsHttp {
 
   async html(pathOrUrl: string): Promise<string> {
     const res = await this.request(pathOrUrl, 'html');
-    if (res.status !== 200) throw new BlockedError(new URL(pathOrUrl, KLMS_BASE).pathname, res.status);
+    const where = new URL(pathOrUrl, KLMS_BASE).pathname;
+    // 로그인이 아닌 곳으로 가는 리다이렉트(조건부 공개 활동 등)와 404는 그 항목만 건너뛴다
+    if ((res.status >= 300 && res.status < 400) || res.status === 404 || res.status === 410) throw new NotAvailableError(where, res.status);
+    if (res.status !== 200) throw new BlockedError(where, res.status);
     return res.text();
   }
 

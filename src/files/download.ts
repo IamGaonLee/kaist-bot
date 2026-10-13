@@ -9,7 +9,7 @@ import { BlockedError, KaistError, SessionExpiredError } from '../errors.js';
 import { probe, type KlmsSession } from '../klms/session.js';
 import { openDb } from '../store/db.js';
 import { formatKst } from '../util/time.js';
-import { assignmentDir, boardFileDir, courseDir, materialPath, previousVersionPath } from './layout.js';
+import { assignmentDir, boardFileDir, courseDir, materialPath, previousVersionPath, safeName } from './layout.js';
 
 const stagingDir = path.join(paths.home, 'staging');
 
@@ -26,11 +26,19 @@ export interface FileCandidate {
 }
 
 interface FileRow {
-  key: string; url: string; etag: string | null; last_modified: string | null; length: number | null;
-  updates_sig: string | null; local_path: string | null; status: string;
+  key: string; url: string; status: string; local_path: string | null; updates_sig: string | null;
+  etag: string | null; last_modified: string | null; length: number | null;
+  dl_etag: string | null; dl_last_modified: string | null; dl_length: number | null;
 }
 
 export interface HeadInfo { status: 'ok' | 'viewer_only' | 'missing'; etag: string | null; lastModified: string | null; length: number | null; contentType: string | null; note?: string }
+
+/** 과목 안에서 이름이 겹치는 과제는 폴더 이름에 cmid를 붙인다 (markdown.ts와 같은 규칙) */
+export function taskFolder(cdir: string, courseId: number, cmid: number, name: string): string {
+  const dup = (openDb().prepare(`select count(*) n from tasks t join modules m on m.cmid = t.cmid
+    where t.course_id = ? and m.removed_at is null and t.name = ?`).get(courseId, name) as { n: number }).n > 1;
+  return assignmentDir(cdir, dup ? `${name} (${cmid})` : name);
+}
 
 /** 대상 과목들의 받을 파일 목록 (로컬 DB 기준) */
 export function collectCandidates(root: string, semesterLabel: string, courseIds: number[]): FileCandidate[] {
@@ -52,21 +60,21 @@ export function collectCandidates(root: string, semesterLabel: string, courseIds
       where t.course_id = ? and m.removed_at is null and t.attachments_json is not null`).all(cid) as { cmid: number; name: string; attachments_json: string }[];
     for (const t of tasks) for (const a of JSON.parse(t.attachments_json) as { filename: string; url: string }[]) {
       out.push({ key: `a:${t.cmid}:${a.filename}`, courseId: cid, source: 'assign', ref: t.cmid, url: a.url, filename: a.filename, section: null, updatesSig: null,
-        target: path.join(assignmentDir(cdir, t.name), a.filename) });
+        target: path.join(taskFolder(cdir, cid, t.cmid, t.name), safeName(a.filename, 120)) });
     }
     const notices = db.prepare(`select bwid, title, posted_at, list_date, attachments_json from notices where course_id = ? and attachments_json is not null and attachments_json <> '[]'`).all(cid) as { bwid: number; title: string; posted_at: number | null; list_date: number | null; attachments_json: string }[];
     for (const n of notices) for (const a of JSON.parse(n.attachments_json) as { filename: string; url: string }[]) {
       const when = n.posted_at ?? n.list_date;
       out.push({ key: `n:${n.bwid}:${a.filename}`, courseId: cid, source: 'notice', ref: n.bwid, url: a.url, filename: a.filename, section: null, updatesSig: null,
-        target: path.join(boardFileDir(cdir, when ? formatKst(when).slice(0, 10) : null, n.title), a.filename) });
+        target: path.join(boardFileDir(cdir, when ? formatKst(when).slice(0, 10) : null, n.title), safeName(a.filename, 120)) });
     }
   }
   // 같은 경로로 가는 파일이 둘 이상이면 이름 뒤에 ref를 붙여 구분
   const seen = new Map<string, number>();
   for (const f of out) seen.set(f.target.toLowerCase(), (seen.get(f.target.toLowerCase()) ?? 0) + 1);
   for (const f of out) if ((seen.get(f.target.toLowerCase()) ?? 0) > 1) {
-    const ext = path.extname(f.target);
-    f.target = f.target.slice(0, f.target.length - ext.length) + ` (${f.ref})` + ext;
+    const p = path.parse(f.target);
+    f.target = path.join(p.dir, `${p.name} (${f.ref})${p.ext}`);
   }
   return out;
 }
@@ -90,61 +98,81 @@ export async function headFile(session: KlmsSession, url: string): Promise<HeadI
   }
 }
 
-const changedSince = (row: FileRow, h: HeadInfo) =>
-  (h.etag && row.etag) ? h.etag !== row.etag : (h.length !== row.length || h.lastModified !== row.last_modified);
+/** 마지막으로 성공한 다운로드(dl_*)와 비교 */
+const changedSinceDownload = (row: FileRow, h: HeadInfo) =>
+  (h.etag && row.dl_etag) ? h.etag !== row.dl_etag : (h.length !== row.dl_length || h.lastModified !== row.dl_last_modified);
 
-export interface FilePlanItem { cand: FileCandidate; head: HeadInfo | null; action: 'download' | 'update' | 'skip' | 'unavailable'; reason: string }
+export interface FilePlanItem {
+  cand: FileCandidate;
+  head: HeadInfo | null;
+  action: 'download' | 'update' | 'skip' | 'unavailable';
+  reason: string;
+  prevStatus: string | null;
+  /** 이미 받아 둔 로컬 사본 (갱신 시 이 파일을 _이전버전으로 옮긴다) */
+  localPath: string | null;
+}
 
-/** 무엇을 받을지 정한다. HEAD는 새 파일·변경 신호가 있는 파일·로컬 사본이 없는 파일에만 보낸다 */
+/** 무엇을 받을지 정한다. HEAD는 새 파일·변경 신호·이전 실패·로컬 사본 없음에만 보낸다 */
 export async function planFiles(session: KlmsSession, cands: FileCandidate[]): Promise<FilePlanItem[]> {
   const db = openDb();
   const plan: FilePlanItem[] = [];
   for (const cand of cands) {
     const row = db.prepare('select * from files where key = ?').get(cand.key) as FileRow | undefined;
-    const haveLocal = !!row?.local_path && fs.existsSync(row.local_path);
-    const signal = !row || row.url !== cand.url || row.status === 'error' || row.status === 'missing'
+    const localPath = row?.local_path && fs.existsSync(row.local_path) ? row.local_path : null;
+    const base = { cand, prevStatus: row?.status ?? null, localPath };
+    const signal = !row || row.url !== cand.url || ['error', 'missing', 'pending'].includes(row.status)
       || (cand.source === 'resource' && row.updates_sig !== cand.updatesSig)
-      || (row.status === 'ok' && !haveLocal)
-      || row.status === 'pending';
-    if (!signal) { plan.push({ cand, head: null, action: 'skip', reason: row.status === 'viewer_only' ? '뷰어 전용 (이전 확인)' : '변경 신호 없음' }); continue; }
-    if (row?.status === 'pending' && row.updates_sig === cand.updatesSig && row.url === cand.url && (row.etag || row.length)) {
-      plan.push({ cand, head: { status: 'ok', etag: row.etag, lastModified: row.last_modified, length: row.length, contentType: null }, action: 'download', reason: '확인 대기 중이던 파일' });
+      || !localPath && row.status !== 'viewer_only';
+    if (!signal) { plan.push({ ...base, head: null, action: 'skip', reason: row.status === 'viewer_only' ? '뷰어 전용 (이전 확인)' : '변경 신호 없음' }); continue; }
+    if (row?.status === 'pending' && !localPath && row.updates_sig === cand.updatesSig && row.url === cand.url && (row.etag || row.length)) {
+      plan.push({ ...base, head: { status: 'ok', etag: row.etag, lastModified: row.last_modified, length: row.length, contentType: null }, action: 'download', reason: '확인 대기 중이던 파일' });
       continue;
     }
     const head = await headFile(session, cand.url);
-    if (head.status !== 'ok') { plan.push({ cand, head, action: 'unavailable', reason: head.note ?? head.status }); continue; }
-    if (!row || row.status !== 'ok') plan.push({ cand, head, action: 'download', reason: '새 파일' });
-    else if (!haveLocal) plan.push({ cand, head, action: 'download', reason: '로컬 사본 없음' });
-    else if (changedSince(row, head)) plan.push({ cand, head, action: 'update', reason: '내용이 바뀜 (이전 버전 보관)' });
-    else plan.push({ cand, head, action: 'skip', reason: '같음' });
+    if (head.status !== 'ok') { plan.push({ ...base, head, action: 'unavailable', reason: head.note ?? head.status }); continue; }
+    // 로컬 사본이 있으면 상태(오류 등)와 무관하게 마지막 성공 다운로드와 내용으로 비교한다
+    if (localPath && row && row.dl_length !== null) {
+      plan.push({ ...base, head, action: changedSinceDownload(row, head) ? 'update' : 'skip', reason: changedSinceDownload(row, head) ? '내용이 바뀜 (이전 버전 보관)' : '같음' });
+    } else {
+      plan.push({ ...base, head, action: 'download', reason: localPath ? '비교 기준 없음' : '새 파일' });
+    }
   }
   return plan;
 }
 
-/** 계획을 DB에 기록 (다운로드 전, 확인 대기 상태 저장용) */
+/** 계획을 DB에 기록 (다운로드 전) */
 export function recordPlan(plan: FilePlanItem[]): void {
   const db = openDb();
   const now = new Date().toISOString();
   const ensure = db.prepare(`insert into files(key, course_id, source, ref, url, filename, section, status, first_seen_at)
     values(?, ?, ?, ?, ?, ?, ?, 'pending', ?) on conflict(key) do nothing`);
-  // 받을 예정: HEAD 정보만 기록 (이미 받은 파일의 갱신이면 기존 기록은 다운로드 성공 때 바꾼다)
-  const pending = db.prepare(`update files set url=?, filename=?, section=?, etag=?, last_modified=?, length=?, updates_sig=?, checked_at=?, note=null
-    where key=? and status <> 'ok'`);
-  // 받을 수 없음: 상태와 이유. 같은 변경 신호로 다시 확인하지 않게 updates_sig도 기록
-  const unavailable = db.prepare(`update files set url=?, status=?, note=?, updates_sig=?, checked_at=? where key=?`);
-  // 확인했더니 같음: 다음에 HEAD를 생략하도록 변경 신호만 갱신
-  const same = db.prepare(`update files set updates_sig=?, checked_at=? where key=?`);
+  // 받을 예정: HEAD 정보 기록 (비교 기준 dl_*는 다운로드 성공 때만 바뀐다)
+  const pending = db.prepare(`update files set url=?, filename=?, section=?, etag=?, last_modified=?, length=?, checked_at=?,
+    status=case when local_path is not null then status else 'pending' end where key=?`);
+  // 받을 수 없음: 로컬 사본이 없을 때만 상태를 바꾸고, 같은 신호로 다시 확인하지 않게 updates_sig 기록
+  const unavailable = db.prepare(`update files set url=?, note=?, updates_sig=?, checked_at=?,
+    status=case when ? then status else ? end where key=?`);
+  // 확인했더니 같음: 로컬 사본이 있으니 정상, 변경 신호만 갱신
+  const same = db.prepare(`update files set status='ok', note=null, updates_sig=?, checked_at=? where key=?`);
   for (const p of plan) {
     if (!p.head) continue;
     const c = p.cand;
     ensure.run(c.key, c.courseId, c.source, c.ref, c.url, c.filename, c.section, now);
-    if (p.action === 'unavailable') unavailable.run(c.url, p.head.status, p.reason, c.updatesSig, now, c.key);
+    if (p.action === 'unavailable') unavailable.run(c.url, p.reason, c.updatesSig, now, p.localPath ? 1 : 0, p.head.status, c.key);
     else if (p.action === 'skip') same.run(c.updatesSig, now, c.key);
-    else pending.run(c.url, c.filename, c.section, p.head.etag, p.head.lastModified, p.head.length, c.updatesSig, now, c.key);
+    else pending.run(c.url, c.filename, c.section, p.head.etag, p.head.lastModified, p.head.length, now, c.key);
   }
 }
 
 export interface DownloadOutcome { key: string; target: string; action: 'download' | 'update'; ok: boolean; bytes?: number; error?: string }
+
+/** 이전 버전 보관 경로 (같은 날 두 번째면 시각을 덧붙임) */
+function archivePath(file: string): string {
+  const day = new Date().toISOString().slice(0, 10);
+  let p = previousVersionPath(file, day);
+  if (fs.existsSync(p)) p = previousVersionPath(file, `${day} ${Date.now()}`);
+  return p;
+}
 
 /** 계획 중 download/update 항목을 실제로 받는다 */
 export async function executeDownloads(session: KlmsSession, plan: FilePlanItem[], runId: number, onStatus?: (m: string) => void): Promise<DownloadOutcome[]> {
@@ -156,36 +184,43 @@ export async function executeDownloads(session: KlmsSession, plan: FilePlanItem[
     i++;
     if (i % 10 === 1) onStatus?.(`파일 받는 중 ${i}/${todo.length}...`);
     const target = p.cand.target;
+    const staged = path.join(stagingDir, `${process.pid}-${i}.part`);
+    const tmp = target + '.kaist-part';
     try {
       const r = await session.http.request(p.cand.url, 'file');
       if (r.status !== 200 || !r.body) throw new KaistError('HTTP_ERROR', `HTTP ${r.status}`);
       // 드라이브 가상 디스크(G:)에 바로 스트림으로 쓰면 직후 크기가 늦게 반영된다(S3 확인).
       // 로컬 staging에 받아 스트림에서 센 바이트로 검증한 뒤 드라이브로 복사한다.
       ensureDir(stagingDir);
-      const staged = path.join(stagingDir, `${process.pid}-${i}.part`);
       let bytes = 0;
       const counter = new Transform({ transform(chunk: Buffer, _enc, cb) { bytes += chunk.length; cb(null, chunk); } });
       await pipeline(Readable.fromWeb(r.body as unknown as WebReadableStream), counter, fs.createWriteStream(staged));
       const expect = r.headers.get('content-length');
-      if (expect && Number(expect) !== bytes) { fs.rmSync(staged, { force: true }); throw new KaistError('DOWNLOAD_INCOMPLETE', `받은 크기 ${bytes} ≠ ${expect}`); }
+      if (expect && Number(expect) !== bytes) throw new KaistError('DOWNLOAD_INCOMPLETE', `받은 크기 ${bytes} ≠ ${expect}`);
       ensureDir(path.dirname(target));
-      const tmp = target + '.kaist-part';
       fs.copyFileSync(staged, tmp);
-      fs.rmSync(staged, { force: true });
-      if (fs.existsSync(target)) {
-        // 이전 버전은 지우지 않고 _이전버전으로 옮긴다
-        const prev = previousVersionPath(target, new Date().toISOString().slice(0, 10));
-        ensureDir(path.dirname(prev));
-        fs.renameSync(target, fs.existsSync(prev) ? prev.replace(/(\.[^.]*)?$/, ` ${Date.now()}$1`) : prev);
+      // 이전 버전은 지우지 않는다: 기존 사본(경로가 바뀌었으면 옛 경로)과 대상 자리에 있던 파일을 _이전버전으로
+      for (const old of new Set([p.localPath, target].filter((x): x is string => !!x && fs.existsSync(x)))) {
+        const arch = archivePath(old);
+        ensureDir(path.dirname(arch));
+        fs.renameSync(old, arch);
       }
       fs.renameSync(tmp, target);
-      db.prepare(`update files set status='ok', local_path=?, etag=?, last_modified=?, length=?, updates_sig=?, downloaded_at=?, downloaded_run=?, note=null where key=?`)
-        .run(target, r.headers.get('etag') ?? p.head?.etag ?? null, r.headers.get('last-modified') ?? p.head?.lastModified ?? null, bytes, p.cand.updatesSig, new Date().toISOString(), runId, p.cand.key);
+      const etag = r.headers.get('etag') ?? p.head?.etag ?? null;
+      const lm = r.headers.get('last-modified') ?? p.head?.lastModified ?? null;
+      db.prepare(`update files set status='ok', local_path=?, etag=?, last_modified=?, length=?, dl_etag=?, dl_last_modified=?, dl_length=?,
+          updates_sig=?, downloaded_at=?, downloaded_run=?, note=null where key=?`)
+        .run(target, etag, lm, bytes, etag, lm, bytes, p.cand.updatesSig, new Date().toISOString(), runId, p.cand.key);
       out.push({ key: p.cand.key, target, action: p.action as 'download' | 'update', ok: true, bytes });
     } catch (e) {
       if (e instanceof SessionExpiredError || e instanceof BlockedError) throw e;
-      db.prepare(`update files set status='error', note=? where key=?`).run(e instanceof Error ? e.message : String(e), p.cand.key);
-      out.push({ key: p.cand.key, target, action: p.action as 'download' | 'update', ok: false, error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      // 로컬 사본이 있으면 상태는 그대로 두고 오류 메모만 남긴다 (사본은 계속 보이게)
+      db.prepare(`update files set status=case when local_path is not null then status else 'error' end, note=? where key=?`).run(msg, p.cand.key);
+      out.push({ key: p.cand.key, target, action: p.action as 'download' | 'update', ok: false, error: msg });
+    } finally {
+      fs.rmSync(staged, { force: true });
+      fs.rmSync(tmp, { force: true });
     }
   }
   return out;

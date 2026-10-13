@@ -65,9 +65,26 @@ export function openDb(file = path.join(paths.home, 'kaist.db')): DatabaseSync {
   if (db) return db;
   ensureDir(path.dirname(file));
   db = new DatabaseSync(file);
-  db.exec('pragma journal_mode = wal; pragma foreign_keys = on;');
+  db.exec('pragma journal_mode = wal; pragma foreign_keys = on; pragma busy_timeout = 5000;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** 기존 DB에 나중에 추가된 칸 */
+function migrate(d: DatabaseSync): void {
+  const add = (table: string, col: string, type: string) => {
+    const cols = (d.prepare(`pragma table_info(${table})`).all() as { name: string }[]).map(c => c.name);
+    if (!cols.includes(col)) d.exec(`alter table ${table} add column ${col} ${type}`);
+  };
+  // 마지막으로 성공한 다운로드의 값 (실패·일시 오류가 비교 기준을 덮지 않도록)
+  add('files', 'dl_etag', 'text');
+  add('files', 'dl_last_modified', 'text');
+  add('files', 'dl_length', 'integer');
+  // 과제 페이지를 마지막으로 성공적으로 처리했을 때의 updates_since 서명
+  add('tasks', 'page_sig', 'text');
+  d.exec(`update files set dl_etag = etag, dl_last_modified = last_modified, dl_length = length where status = 'ok' and dl_length is null`);
+  d.exec(`update tasks set page_sig = (select updates_sig from modules where modules.cmid = tasks.cmid) where page_sig is null and page_fetched_at is not null`);
 }
 
 export function getMeta(key: string): string | null {

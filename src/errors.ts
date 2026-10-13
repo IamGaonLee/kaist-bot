@@ -33,5 +33,12 @@ export class BlockedError extends KaistError {
   }
 }
 
+/** 이 항목은 볼 수 없다 (조건부 공개, 삭제됨 등). 그 항목만 건너뛴다 */
+export class NotAvailableError extends KaistError {
+  constructor(where: string, status: number) {
+    super('NOT_AVAILABLE', `${where}: 열 수 없는 항목입니다 (HTTP ${status}). 건너뜁니다.`, { where, status });
+  }
+}
+
 export const exitCodeOf = (e: unknown): number =>
   e instanceof SessionExpiredError ? 2 : e instanceof LoginCancelledError ? 3 : 1;
