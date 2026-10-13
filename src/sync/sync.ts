@@ -21,8 +21,6 @@ import { nowSec } from '../util/time.js';
 import { resolveDeadline, type Deadline } from './deadlines.js';
 import { checkCoursePage, HANDLED, InvariantError } from './invariants.js';
 
-/** 과제 페이지를 다시 받는 기준: 마감이 이 시간 이내로 지났거나 앞으로인 과제 */
-const ACTIVE_WINDOW_SEC = 3 * 86400;
 const MAX_BOARD_PAGES = 30;
 
 export interface Change {
@@ -299,7 +297,10 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
     // 링크가 없는 활동(조건부 공개 등)은 페이지를 열지 않는다
     if (m.modname === 'assign' && m.url) {
       // 변경 신호는 과제 페이지를 성공적으로 처리했을 때의 서명(page_sig)과 비교한다 — 실패해도 다음에 다시 시도
-      const needPage = !prev || !prev.page_fetched_at || prev.page_sig !== sig || prevDue === null || prevDue >= t - ACTIVE_WINDOW_SEC;
+      // 페이지를 열면 KLMS에 조회 기록이 남으므로 횟수를 줄인다 (사용자 결정):
+      // 새 과제, KLMS가 변경을 알린 과제, 마감 전이고 아직 제출하지 않은 과제만
+      const open = prev?.submission_code !== 'submitted' && (prevDue === null || prevDue >= t);
+      const needPage = !prev || !prev.page_fetched_at || prev.page_sig !== sig || open;
       if (needPage) {
         try {
           const ah = await session.http.html(`/mod/assign/view.php?id=${m.cmid}`);
