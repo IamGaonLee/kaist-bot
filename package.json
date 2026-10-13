@@ -1,22 +1,26 @@
 {
-  "name": "kaistbot",
+  "name": "kaist",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "build": "tsc -p .",
+    "dev": "tsx src/cli.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.6.5",
     "playwright": "^1.64.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
-  }
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "bin": {
+    "kaist": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
 }

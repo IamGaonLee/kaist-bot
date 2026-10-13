@@ -5,7 +5,8 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 ## 현재 단계
 
 - S0 완료 (설계 문서 v0.2, CLAUDE.md, 2026-10-14 승인)
-- **S1 진행 중**: 인증과 과목 목록 (`login`, `status`, `courses`)
+- **S1 구현 완료, 사용자 확인 대기**: 인증과 과목 목록 (`login`, `status`, `courses`)
+- 다음: S2 과목 구성, 과제, 공지 수집
 - 사용자 할 일:
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
   - S3 전까지 Google Drive for desktop 설치
@@ -24,6 +25,14 @@ scripts/phase0/    0단계 검증 스크립트 (버리는 코드, 참고용)
 src/               CLI 본체 (S1부터)
 %LOCALAPPDATA%\kaist-cli\   세션 쿠키, OAuth 토큰, DB, HTML 샘플·원문 (저장소 밖)
 ```
+
+## 개발
+
+- 빌드 `npm run build` (dist/), 전역 명령 연결 `npm link` → `kaist`
+- 개발 실행 `npm run dev -- <명령>`, 테스트 `npm test` (tests/, 합성 데이터만)
+- 코드 배치: `src/sso/`(사이트 무관 로그인 창), `src/klms/`(site.ts 상수·판별, http.ts 공통 계층, ajax.ts, session.ts, courses.ts), `src/store/`(로컬 데이터)
+- 종료 코드: 0 성공, 1 오류, 2 세션 만료(`--no-login`), 3 로그인 취소
+- 현재 명령: `kaist login [--force]`, `kaist status [--check]`, `kaist courses [--refresh] [--no-login]`. 모두 `--json` 지원
 
 ## 작업 규칙
 
