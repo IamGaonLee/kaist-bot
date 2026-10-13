@@ -56,6 +56,8 @@ class Limiter {
 
 export class KlmsHttp {
   private readonly limiter: Limiter;
+  /** 이 클라이언트로 보낸 요청 수 (sync 결과에 표시) */
+  requestCount = 0;
 
   constructor(private readonly session: SessionFile, private readonly store: SessionStore | null, opts: HttpOptions = {}) {
     this.limiter = new Limiter(opts.minIntervalMs ?? 500, Math.min(opts.maxConcurrent ?? 2, 2));
@@ -64,6 +66,7 @@ export class KlmsHttp {
   /** 만료·차단이면 예외. 리다이렉트는 따라가지 않는다(만료 감지를 위해). */
   async request(pathOrUrl: string, expect: Expect, init: RequestInit = {}): Promise<Response> {
     const url = new URL(pathOrUrl, KLMS_BASE);
+    this.requestCount++;
     const res = await this.limiter.run(() => fetch(url, {
       ...init,
       redirect: 'manual',

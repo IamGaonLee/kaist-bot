@@ -5,8 +5,9 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 ## 현재 단계
 
 - S0 완료 (설계 문서 v0.2, CLAUDE.md, 2026-10-14 승인)
-- **S1 구현 완료, 사용자 확인 대기**: 인증과 과목 목록 (`login`, `status`, `courses`)
-- 다음: S2 과목 구성, 과제, 공지 수집
+- S1 완료: 인증과 과목 목록
+- S2 완료 (2026-10-14): `sync`(과목 구성·과제·공지), `assignments`, `notices`, `videos`, `doctor`. 사용자 대조(과제 3개 이상 KLMS 화면과 비교) 대기
+- **S3 진행 중**: 강의자료 다운로드와 드라이브 폴더 정리
 - 사용자 할 일:
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
   - S3 전까지 Google Drive for desktop 설치
@@ -32,7 +33,13 @@ src/               CLI 본체 (S1부터)
 - 개발 실행 `npm run dev -- <명령>`, 테스트 `npm test` (tests/, 합성 데이터만)
 - 코드 배치: `src/sso/`(사이트 무관 로그인 창), `src/klms/`(site.ts 상수·판별, http.ts 공통 계층, ajax.ts, session.ts, courses.ts), `src/store/`(로컬 데이터)
 - 종료 코드: 0 성공, 1 오류, 2 세션 만료(`--no-login`), 3 로그인 취소
-- 현재 명령: `kaist login [--force]`, `kaist status [--check]`, `kaist courses [--refresh] [--no-login]`. 모두 `--json` 지원
+- 명령 (모두 `--json` 지원):
+  - `kaist login [--force]`, `kaist status [--check]`, `kaist courses [--refresh] [--no-login]`
+  - `kaist sync [--course X] [--no-login]`: KLMS 접속. 과목 페이지, updates_since, 캘린더(사이트 전체 월별), 과제 페이지(새것·변경·마감 임박만), 게시판 새 글
+  - `kaist assignments [--due 7d] [--all] [--course X]`, `kaist notices [--since 3d] [--kind notice|qna|board] [--body]`, `kaist videos`: 로컬 DB만
+  - `kaist doctor [과목] [--offline]`: 불변식 검사 (DB 변경 없음)
+- 로컬 데이터: `%LOCALAPPDATA%\kaist-cli\kaist.db`(SQLite), `snapshots\`(최근 HTML 원문)
+- 파서 코드: `src/klms/adapters/`, 셀렉터는 `src/klms/selectors.ts` 한 곳
 
 ## 작업 규칙
 
@@ -69,3 +76,6 @@ src/               CLI 본체 (S1부터)
 - 공지/게시판은 표준 forum이 아니라 `mod_courseboard`이고 API가 없다. 수정 시각도 없다.
 - HTML의 `downloadFile(...)` 안 따옴표는 `&#039;`로 이스케이프되어 있다. HTML 파서로 읽는다.
 - 날짜는 Asia/Seoul 고정이고, "오전 12:00"은 00:00이다.
+- `core_course_get_updates_since`(since=0)는 courseboard를 돌려주지 않고, 종료된 간편설문(choice)도 빠질 수 있다. 불변식 1은 이를 반영했다(`src/sync/invariants.ts`).
+- 과제 페이지에는 제출 파일 링크(학번·이름 포함)가 함께 있다. 과제 첨부는 `mod_assign/introattachment` 링크만 쓴다.
+- 캘린더는 `courseid: 1`(사이트 전체) 월별 조회로 모든 과목 마감이 한 번에 온다.

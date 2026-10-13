@@ -1,0 +1,278 @@
+// kaist sync (S2: 과목 구성, 과제, 공지. 파일 다운로드·캘린더 반영 제외)
+import { BlockedError, KaistError, SessionExpiredError } from '../errors.js';
+import { parseAssignPage } from '../klms/adapters/assign-page.js';
+import { parseCoursePage, type ParsedModule } from '../klms/adapters/course-page.js';
+import { parseArticle, parseBoardList } from '../klms/adapters/courseboard.js';
+import { fetchCalendarEvents, type CalendarEvent } from '../klms/calendar.js';
+import { fetchCurrentCourses, type Course } from '../klms/courses.js';
+import { ensureSession, type KlmsSession } from '../klms/session.js';
+import { saveCourses } from '../store/courses-cache.js';
+import { getMeta, openDb, setMeta, tx } from '../store/db.js';
+import { saveSnapshot, sha1 } from '../store/snapshots.js';
+import { nowSec } from '../util/time.js';
+import { resolveDeadline } from './deadlines.js';
+import { checkCoursePage, HANDLED, InvariantError } from './invariants.js';
+
+/** 과제 페이지를 다시 받는 기준: 마감이 이 시간 이내로 지났거나 앞으로인 과제 */
+const ACTIVE_WINDOW_SEC = 3 * 86400;
+const MAX_BOARD_PAGES = 30;
+
+export interface Change {
+  courseId: number;
+  kind: 'module' | 'task' | 'notice';
+  ref: number;
+  change: 'new' | 'changed' | 'removed' | 'due_changed' | 'status_changed' | 'needs_review';
+  title: string;
+  detail?: string;
+}
+
+export interface CourseOutcome {
+  id: number;
+  code: string;
+  name: string;
+  ok: boolean;
+  error?: { code: string; message: string };
+  stats?: Record<string, number>;
+}
+
+export interface SyncResult {
+  runId: number;
+  startedAt: string;
+  finishedAt: string;
+  status: 'ok' | 'partial' | 'aborted';
+  semester: string;
+  courses: CourseOutcome[];
+  changes: Change[];
+  unprocessed: Record<string, number>;
+  warnings: string[];
+  requests: number;
+  abortReason?: { code: string; message: string };
+}
+
+export interface SyncOptions {
+  course?: string;
+  interactive: boolean;
+  onStatus?: (m: string) => void;
+}
+
+const iso = () => new Date().toISOString();
+const moduleHash = (m: ParsedModule) => sha1(m.name, m.url, m.file?.url, m.file?.filename, m.endDtText, m.boardKind, m.text);
+
+export function matchCourse(c: Course, q: string): boolean {
+  const s = q.trim().toLowerCase();
+  return String(c.id) === s || c.code.toLowerCase() === s || c.code.toLowerCase().startsWith(s) || c.name.toLowerCase().includes(s);
+}
+
+export async function runSync(opts: SyncOptions): Promise<SyncResult> {
+  const log = opts.onStatus ?? (() => {});
+  const db = openDb();
+  const startedAt = iso();
+  const runId = Number(db.prepare('insert into sync_runs(started_at, status) values(?, ?)').run(startedAt, 'running').lastInsertRowid);
+  const result: SyncResult = {
+    runId, startedAt, finishedAt: startedAt, status: 'ok', semester: '', courses: [], changes: [], unprocessed: {}, warnings: [], requests: 0,
+  };
+  let session: KlmsSession | null = null;
+
+  try {
+    session = await ensureSession({ interactive: opts.interactive, onStatus: log });
+    const { semester, courses } = await fetchCurrentCourses(session);
+    saveCourses({ fetchedAt: iso(), semester, courses });
+    result.semester = semester.label;
+
+    const targets = opts.course ? courses.filter(c => matchCourse(c, opts.course!)) : courses;
+    if (targets.length === 0) throw new KaistError('NO_COURSE_MATCH', `"${opts.course}"에 해당하는 이번 학기 과목이 없습니다.`);
+
+    // 마감: 사이트 전체 월별 캘린더 (학기 시작 ~ 종료+1개월)
+    const from = Math.min(...targets.map(c => c.startdate));
+    const to = Math.max(...targets.map(c => c.enddate)) + 31 * 86400;
+    log(`캘린더 조회 중...`);
+    const events = await fetchCalendarEvents(session, from, to);
+    const eventsByCmid = new Map<number, CalendarEvent[]>();
+    for (const e of events) if (e.instance !== null) eventsByCmid.set(e.instance, [...(eventsByCmid.get(e.instance) ?? []), e]);
+
+    for (const course of targets) {
+      log(`${course.code} ${course.name} 수집 중...`);
+      try {
+        const stats = await syncCourse(session, course, eventsByCmid, result);
+        result.courses.push({ id: course.id, code: course.code, name: course.name, ok: true, stats });
+        db.prepare('update courses set last_synced_at = ? where id = ?').run(iso(), course.id);
+      } catch (e) {
+        // 세션 만료·차단은 전체 중단, 파싱·불변식 실패는 그 과목만 중단
+        if (e instanceof SessionExpiredError || e instanceof BlockedError) throw e;
+        const err = e instanceof KaistError ? e : new KaistError('INTERNAL', e instanceof Error ? e.message : String(e));
+        result.courses.push({ id: course.id, code: course.code, name: course.name, ok: false, error: { code: err.code, message: err.message } });
+        result.status = 'partial';
+      }
+    }
+
+    // 이벤트 instance가 cmid라는 KLMS 특이사항 검사: 과제/퀴즈 이벤트의 instance가 우리가 아는 cmid여야 한다
+    const known = new Set((db.prepare('select cmid from modules').all() as { cmid: number }[]).map(r => r.cmid));
+    const targetIds = new Set(targets.map(c => c.id));
+    const strange = events.filter(e => (e.modulename === 'assign' || e.modulename === 'quiz') && e.courseId !== null && targetIds.has(e.courseId) && e.instance !== null && !known.has(e.instance));
+    if (strange.length) {
+      result.warnings.push(`캘린더 이벤트 ${strange.length}개의 instance가 알려진 cmid가 아닙니다. KLMS가 instance 의미를 바꿨을 수 있습니다 (마감 매핑 확인 필요).`);
+    }
+  } catch (e) {
+    result.status = 'aborted';
+    const err = e instanceof KaistError ? e : new KaistError('INTERNAL', e instanceof Error ? e.message : String(e));
+    result.abortReason = { code: err.code, message: err.message };
+  } finally {
+    session?.http.persist();
+    result.requests = session?.http.requestCount ?? 0;
+    result.finishedAt = iso();
+    const summary = { ...result, changes: result.changes.length };
+    db.prepare('update sync_runs set finished_at = ?, status = ?, summary_json = ? where id = ?').run(result.finishedAt, result.status, JSON.stringify(summary), runId);
+    const ins = db.prepare('insert into changes(run_id, course_id, kind, ref, change, title, detail) values(?, ?, ?, ?, ?, ?, ?)');
+    tx(() => { for (const c of result.changes) ins.run(runId, c.courseId, c.kind, c.ref, c.change, c.title, c.detail ?? null); });
+    if (result.status !== 'aborted') setMeta('last_sync_at', result.finishedAt);
+  }
+  return result;
+}
+
+async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Map<number, CalendarEvent[]>, result: SyncResult): Promise<Record<string, number>> {
+  const db = openDb();
+  const now = iso();
+  const where = `${course.code} 과목 페이지`;
+  const html = await session.http.html(`/course/view.php?id=${course.id}&section=0`);
+  saveSnapshot(`course-${course.id}`, html);
+  const page = parseCoursePage(html, where);
+
+  // 불변식 3: 테마/리비전 변화 감지
+  const themeKey = `${page.theme}@${page.themerev}`;
+  const prevTheme = getMeta('theme');
+  if (prevTheme && prevTheme !== themeKey && !result.warnings.some(w => w.startsWith('KLMS 변경 감지'))) {
+    result.warnings.push(`KLMS 변경 감지: 테마 ${prevTheme} → ${themeKey}. 불변식은 모두 다시 검사했습니다. 결과를 KLMS 화면과 한 번 대조해 주세요.`);
+  }
+  setMeta('theme', themeKey);
+
+  // 불변식 1·2
+  const upd = await session.ajax<{ instances?: { contextlevel: string; id: number; updates: unknown[] }[] }>('core_course_get_updates_since', { courseid: course.id, since: 0 });
+  const updSig = new Map<number, string>();
+  for (const i of upd?.instances ?? []) if (i.contextlevel === 'module') updSig.set(i.id, sha1(JSON.stringify(i.updates)));
+  const inv = checkCoursePage(page, new Set(updSig.keys()));
+  if (!inv.ok) throw new InvariantError(`${course.code} ${course.name}`, inv.failures);
+
+  for (const m of page.modules) if (!HANDLED.has(m.modname)) result.unprocessed[m.modname] = (result.unprocessed[m.modname] ?? 0) + 1;
+
+  const push = (c: Omit<Change, 'courseId'>) => result.changes.push({ courseId: course.id, ...c });
+
+  // 섹션과 활동
+  const prevMods = new Map((db.prepare('select cmid, content_hash, updates_sig, removed_at from modules where course_id = ?').all(course.id) as { cmid: number; content_hash: string; updates_sig: string | null; removed_at: string | null }[]).map(r => [r.cmid, r]));
+  const changedByUpdates = new Set<number>();
+  tx(() => {
+    db.prepare('delete from sections where course_id = ?').run(course.id);
+    const insSec = db.prepare('insert into sections(course_id, number, name, date_range, summary) values(?, ?, ?, ?, ?)');
+    for (const s of page.sections) insSec.run(course.id, s.number, s.name, s.dateRange, s.summaryText);
+
+    const upMod = db.prepare(`insert into modules(cmid, course_id, section, modname, name, url, file_url, file_name, end_dt_text, status_text, board_kind, label_text, updates_sig, content_hash, first_seen_at, last_seen_at, removed_at)
+      values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+      on conflict(cmid) do update set course_id=excluded.course_id, section=excluded.section, modname=excluded.modname, name=excluded.name, url=excluded.url,
+        file_url=excluded.file_url, file_name=excluded.file_name, end_dt_text=excluded.end_dt_text, status_text=excluded.status_text, board_kind=excluded.board_kind,
+        label_text=excluded.label_text, updates_sig=excluded.updates_sig, content_hash=excluded.content_hash, last_seen_at=excluded.last_seen_at, removed_at=null`);
+    for (const m of page.modules) {
+      const hash = moduleHash(m);
+      const sig = updSig.get(m.cmid) ?? null;
+      const prev = prevMods.get(m.cmid);
+      if (!prev || prev.removed_at) push({ kind: 'module', ref: m.cmid, change: 'new', title: m.name || m.modname, detail: m.modname });
+      else if (prev.content_hash !== hash) push({ kind: 'module', ref: m.cmid, change: 'changed', title: m.name || m.modname, detail: m.modname });
+      if (prev && sig !== prev.updates_sig) changedByUpdates.add(m.cmid);
+      upMod.run(m.cmid, course.id, m.section, m.modname, m.name, m.url, m.file?.url ?? null, m.file?.filename ?? null, m.endDtText, m.status, m.boardKind, m.text, sig, hash, now, now);
+    }
+    const present = new Set(page.modules.map(m => m.cmid));
+    const rm = db.prepare('update modules set removed_at = ? where cmid = ?');
+    for (const [cmid, prev] of prevMods) {
+      if (!present.has(cmid) && !prev.removed_at) {
+        rm.run(now, cmid);
+        const name = (db.prepare('select name, modname from modules where cmid = ?').get(cmid) as { name: string; modname: string });
+        push({ kind: 'module', ref: cmid, change: 'removed', title: name.name || name.modname, detail: name.modname });
+      }
+    }
+  });
+
+  // 과제·퀴즈
+  let pagesFetched = 0;
+  const t = nowSec();
+  for (const m of page.modules.filter(x => x.modname === 'assign' || x.modname === 'quiz')) {
+    const prev = db.prepare('select * from tasks where cmid = ?').get(m.cmid) as Record<string, unknown> | undefined;
+    const prevDue = (prev?.due as number | null) ?? null;
+    let parsed: ReturnType<typeof parseAssignPage> | null = null;
+    if (m.modname === 'assign') {
+      const needPage = !prev || !prev.page_fetched_at || changedByUpdates.has(m.cmid) || prevDue === null || prevDue >= t - ACTIVE_WINDOW_SEC;
+      if (needPage) {
+        const ah = await session.http.html(`/mod/assign/view.php?id=${m.cmid}`);
+        saveSnapshot(`assign-${m.cmid}`, ah);
+        parsed = parseAssignPage(ah, `${course.code} 과제 "${m.name}" (cmid ${m.cmid})`);
+        pagesFetched++;
+      }
+    }
+    const pageDue = parsed ? parsed.due : ((prev?.page_due as number | null) ?? null);
+    const evs = eventsByCmid.get(m.cmid) ?? [];
+    const dl = resolveDeadline({ cmid: m.cmid, modname: m.modname, htmlEnd: m.endDt?.end ?? null, pageDue, events: evs, myUserId: page.userId });
+    const openAt = m.modname === 'quiz' ? (evs.find(e => e.eventtype === 'open')?.timestart ?? m.endDt?.start ?? null) : (m.endDt?.start ?? null);
+    const introHash = parsed ? sha1(parsed.introHtml, JSON.stringify(parsed.attachments)) : ((prev?.intro_hash as string | null) ?? null);
+
+    if (!prev) push({ kind: 'task', ref: m.cmid, change: 'new', title: m.name, detail: m.modname });
+    else {
+      if (prevDue !== dl.due) push({ kind: 'task', ref: m.cmid, change: 'due_changed', title: m.name, detail: `${prevDue ?? '-'} → ${dl.due ?? '-'}` });
+      if (parsed && prev.submission_code !== parsed.submissionCode) push({ kind: 'task', ref: m.cmid, change: 'status_changed', title: m.name, detail: `${prev.submission_code ?? '-'} → ${parsed.submissionCode ?? '-'}` });
+      if (parsed && prev.intro_hash && prev.intro_hash !== introHash) push({ kind: 'task', ref: m.cmid, change: 'changed', title: m.name, detail: '설명/첨부 변경' });
+    }
+    if (dl.needsReview && !(prev?.needs_review)) push({ kind: 'task', ref: m.cmid, change: 'needs_review', title: m.name, detail: dl.reason ?? undefined });
+
+    db.prepare(`insert into tasks(cmid, course_id, modname, name, due, due_source, html_end, page_due, open_at, needs_review, review_reason, calendar_event_id,
+        submission_code, submission_text, grading_code, grading_text, last_modified_text, intro_html, intro_hash, attachments_json, page_fetched_at, updated_at)
+      values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(cmid) do update set course_id=excluded.course_id, modname=excluded.modname, name=excluded.name, due=excluded.due, due_source=excluded.due_source,
+        html_end=excluded.html_end, page_due=excluded.page_due, open_at=excluded.open_at, needs_review=excluded.needs_review, review_reason=excluded.review_reason,
+        calendar_event_id=excluded.calendar_event_id,
+        submission_code=coalesce(excluded.submission_code, tasks.submission_code), submission_text=coalesce(excluded.submission_text, tasks.submission_text),
+        grading_code=coalesce(excluded.grading_code, tasks.grading_code), grading_text=coalesce(excluded.grading_text, tasks.grading_text),
+        last_modified_text=coalesce(excluded.last_modified_text, tasks.last_modified_text), intro_html=coalesce(excluded.intro_html, tasks.intro_html),
+        intro_hash=coalesce(excluded.intro_hash, tasks.intro_hash), attachments_json=coalesce(excluded.attachments_json, tasks.attachments_json),
+        page_fetched_at=coalesce(excluded.page_fetched_at, tasks.page_fetched_at), updated_at=excluded.updated_at`)
+      .run(m.cmid, course.id, m.modname, m.name, dl.due, dl.source, m.endDt?.end ?? null, pageDue, openAt, dl.needsReview ? 1 : 0, dl.reason, dl.calendarEventId,
+        parsed?.submissionCode ?? null, parsed?.submissionText ?? null, parsed?.gradingCode ?? null, parsed?.gradingText ?? null, parsed?.lastModifiedText ?? null,
+        parsed?.introHtml ?? null, parsed ? introHash : null, parsed ? JSON.stringify(parsed.attachments) : null, parsed ? now : null, now);
+  }
+
+  // 게시판: 목록 1쪽부터, 모르는 글만 본문을 받는다. 1쪽이 전부 새 글이면 다음 쪽으로
+  let listPages = 0;
+  let articles = 0;
+  for (const b of page.modules.filter(x => x.modname === 'courseboard')) {
+    const knownBefore = new Set((db.prepare('select bwid from notices where board_cmid = ?').all(b.cmid) as { bwid: number }[]).map(r => r.bwid));
+    const known = new Set(knownBefore);
+    const seenThisRun = new Set<number>();
+    let pageNo = 1;
+    for (;;) {
+      const lh = await session.http.html(`/mod/courseboard/view.php?id=${b.cmid}${pageNo > 1 ? `&page=${pageNo}` : ''}`);
+      if (pageNo === 1) saveSnapshot(`board-${b.cmid}`, lh);
+      const list = parseBoardList(lh, `${course.code} 게시판 "${b.name}" ${pageNo}쪽`);
+      listPages++;
+      // 고정 글처럼 여러 쪽에 반복되는 글은 "다음 쪽으로 갈지" 판단에서 뺀다
+      const unseen = list.posts.filter(p => !seenThisRun.has(p.bwid));
+      for (const p of list.posts) seenThisRun.add(p.bwid);
+      const fresh = unseen.filter(p => !known.has(p.bwid));
+      for (const p of fresh) {
+        const ah = await session.http.html(p.url);
+        const art = parseArticle(ah, `${course.code} 게시판 글 (bwid ${p.bwid})`);
+        articles++;
+        db.prepare(`insert into notices(bwid, board_cmid, course_id, board_kind, title, author, list_date, posted_at, posted_text, body_html, body_hash, has_attachment, attachments_json, first_seen_at, updated_at)
+          values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict(bwid) do update set title=excluded.title, body_html=excluded.body_html, body_hash=excluded.body_hash, attachments_json=excluded.attachments_json, updated_at=excluded.updated_at`)
+          .run(p.bwid, b.cmid, course.id, b.boardKind ?? 'board', art.title, art.author, p.listDate, art.postedAt, art.postedText, art.bodyHtml, sha1(art.bodyHtml),
+            p.hasAttachment ? 1 : 0, JSON.stringify(art.attachments), now, now);
+        known.add(p.bwid);
+        push({ kind: 'notice', ref: p.bwid, change: 'new', title: art.title, detail: b.boardKind ?? 'board' });
+      }
+      const allFresh = unseen.length > 0 && unseen.every(p => !knownBefore.has(p.bwid));
+      if (!allFresh || pageNo >= list.maxPage || pageNo >= MAX_BOARD_PAGES) break;
+      pageNo++;
+    }
+    const count = (db.prepare('select count(*) n from notices where board_cmid = ?').get(b.cmid) as { n: number }).n;
+    db.prepare(`insert into boards(cmid, course_id, kind, name, last_checked_at, post_count) values(?, ?, ?, ?, ?, ?)
+      on conflict(cmid) do update set kind=excluded.kind, name=excluded.name, last_checked_at=excluded.last_checked_at, post_count=excluded.post_count`)
+      .run(b.cmid, course.id, b.boardKind ?? 'board', b.name, now, count);
+  }
+
+  return { ...inv.stats, assignPages: pagesFetched, boardListPages: listPages, newArticles: articles, firstSync: prevMods.size === 0 ? 1 : 0 };
+}

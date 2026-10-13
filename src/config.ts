@@ -19,7 +19,6 @@ export const paths = {
   home,
   session: path.join(home, 'session.json'),
   data: path.join(home, 'data'),
-  coursesCache: path.join(home, 'data', 'courses.json'),
 };
 
 export function ensureDir(dir: string): void {
