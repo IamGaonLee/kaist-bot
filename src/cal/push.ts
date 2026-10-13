@@ -60,7 +60,10 @@ const descBody = (d: string | undefined) => (d ?? '').split('\n').filter(l => !l
 const sameContent = (a: GEvent, b: GEvent) =>
   a.summary === b.summary && descBody(a.description) === descBody(b.description)
   && Date.parse(a.start.dateTime) === Date.parse(b.start.dateTime) && Date.parse(a.end.dateTime) === Date.parse(b.end.dateTime)
-  && JSON.stringify(a.reminders?.overrides ?? []) === JSON.stringify(b.reminders?.overrides ?? []);
+  && reminderKey(a) === reminderKey(b);
+
+/** 구글은 알림 순서를 임의로 바꿔 돌려준다 → 정렬해서 비교 */
+const reminderKey = (e: GEvent) => (e.reminders?.overrides ?? []).map(o => `${o.method}:${o.minutes}`).sort().join(',');
 
 export interface PushResult { calendarId: string; created: string[]; updated: string[]; refreshed: number; skippedReview: string[] }
 
