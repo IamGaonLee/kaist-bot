@@ -20,6 +20,7 @@ export interface ParsedAssignPage {
 }
 
 const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
+const NO_ATTEMPT = /^(시도 하지 않음|No attempt)$/i;
 
 export function parseAssignPage(html: string, where = '과제 페이지'): ParsedAssignPage {
   const $ = cheerio.load(html);
@@ -59,7 +60,8 @@ export function parseAssignPage(html: string, where = '과제 페이지'): Parse
     title,
     introHtml,
     attachments,
-    submissionCode: sub?.cls.match(/\bsubmissionstatus(\w+)/)?.[1] ?? null,
+    // "시도 하지 않음" 칸에는 상태 클래스가 없다(S3 확인) → 문구로 보완
+    submissionCode: sub?.cls.match(/\bsubmissionstatus(\w+)/)?.[1] ?? (sub && NO_ATTEMPT.test(sub.text) ? 'noattempt' : null),
     submissionText: sub?.text ?? null,
     gradingCode: grade?.cls.match(/\bsubmission(graded|notgraded)\b/)?.[1] ?? null,
     gradingText: grade?.text ?? null,

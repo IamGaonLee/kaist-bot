@@ -1,5 +1,10 @@
-// kaist sync (S2: 과목 구성, 과제, 공지. 파일 다운로드·캘린더 반영 제외)
+// kaist sync: 과목 구성, 과제, 공지(S2) + 파일 다운로드와 드라이브 요약(S3). 캘린더 반영은 S4
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadSettings } from '../config.js';
 import { BlockedError, KaistError, SessionExpiredError } from '../errors.js';
+import { collectCandidates, executeDownloads, planFiles, recordPlan } from '../files/download.js';
+import { writeMarkdown } from '../files/markdown.js';
 import { parseAssignPage } from '../klms/adapters/assign-page.js';
 import { parseCoursePage, type ParsedModule } from '../klms/adapters/course-page.js';
 import { parseArticle, parseBoardList } from '../klms/adapters/courseboard.js';
@@ -35,8 +40,20 @@ export interface CourseOutcome {
   stats?: Record<string, number>;
 }
 
+export interface FileStage {
+  root: string;
+  awaitingConfirm: boolean;
+  planned: { download: number; update: number; unavailable: number; same: number; bytes: number };
+  downloaded: number;
+  updated: number;
+  failed: { file: string; error: string }[];
+  unavailable: { file: string; reason: string }[];
+  markdownWritten: number;
+}
+
 export interface SyncResult {
   runId: number;
+  files?: FileStage;
   startedAt: string;
   finishedAt: string;
   status: 'ok' | 'partial' | 'aborted';
@@ -52,6 +69,10 @@ export interface SyncResult {
 export interface SyncOptions {
   course?: string;
   interactive: boolean;
+  /** false면 파일 다운로드와 드라이브 md 생성을 건너뜀 */
+  files?: boolean;
+  /** 첫 전체 다운로드를 승인 */
+  confirmDownload?: boolean;
   onStatus?: (m: string) => void;
 }
 
@@ -112,6 +133,10 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     if (strange.length) {
       result.warnings.push(`캘린더 이벤트 ${strange.length}개의 instance가 알려진 cmid가 아닙니다. KLMS가 instance 의미를 바꿨을 수 있습니다 (마감 매핑 확인 필요).`);
     }
+
+    // 파일 다운로드와 드라이브 요약 (S3)
+    const okIds = result.courses.filter(c => c.ok).map(c => c.id);
+    if (opts.files !== false && okIds.length) result.files = await fileStage(session, semester.label, okIds, runId, opts, result);
   } catch (e) {
     result.status = 'aborted';
     const err = e instanceof KaistError ? e : new KaistError('INTERNAL', e instanceof Error ? e.message : String(e));
@@ -127,6 +152,56 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     if (result.status !== 'aborted') setMeta('last_sync_at', result.finishedAt);
   }
   return result;
+}
+
+async function fileStage(session: KlmsSession, semesterLabel: string, courseIds: number[], runId: number, opts: SyncOptions, result: SyncResult): Promise<FileStage | undefined> {
+  const log = opts.onStatus ?? (() => {});
+  const { driveRoot } = loadSettings();
+  // 드라이브 루트의 상위(예: G:\내 드라이브)가 없으면 동기화 폴더가 아니므로 쓰지 않는다
+  if (!fs.existsSync(path.dirname(driveRoot))) {
+    result.warnings.push(`드라이브 폴더 ${path.dirname(driveRoot)}가 없어 파일 다운로드와 요약 md를 건너뛰었습니다. Google Drive 실행 여부나 config.json의 driveRoot를 확인해 주세요.`);
+    return undefined;
+  }
+  const db = openDb();
+  log('받을 파일 확인 중...');
+  const cands = collectCandidates(driveRoot, semesterLabel, courseIds);
+  const plan = await planFiles(session, cands);
+  recordPlan(plan);
+  const stage: FileStage = {
+    root: driveRoot, awaitingConfirm: false,
+    planned: {
+      download: plan.filter(p => p.action === 'download').length,
+      update: plan.filter(p => p.action === 'update').length,
+      unavailable: plan.filter(p => p.action === 'unavailable').length,
+      same: plan.filter(p => p.action === 'skip').length,
+      bytes: plan.filter(p => p.action === 'download' || p.action === 'update').reduce((s, p) => s + (p.head?.length ?? 0), 0),
+    },
+    downloaded: 0, updated: 0, failed: [],
+    unavailable: plan.filter(p => p.action === 'unavailable').map(p => ({ file: p.cand.filename, reason: p.reason })),
+    markdownWritten: 0,
+  };
+  for (const p of plan.filter(x => x.action === 'unavailable')) {
+    result.changes.push({ courseId: p.cand.courseId, kind: 'module', ref: p.cand.ref, change: 'changed', title: p.cand.filename, detail: `받지 않음: ${p.reason}` });
+  }
+
+  // 첫 전체 다운로드는 예상 개수·용량을 보여주고 승인을 받는다
+  const anyDownloaded = (db.prepare(`select count(*) n from files where status = 'ok' and local_path is not null`).get() as { n: number }).n > 0;
+  if (opts.confirmDownload) setMeta('download_confirmed', '1');
+  if (!anyDownloaded && getMeta('download_confirmed') !== '1') {
+    stage.awaitingConfirm = true;
+  } else {
+    const outcomes = await executeDownloads(session, plan, runId, log);
+    stage.downloaded = outcomes.filter(o => o.ok && o.action === 'download').length;
+    stage.updated = outcomes.filter(o => o.ok && o.action === 'update').length;
+    stage.failed = outcomes.filter(o => !o.ok).map(o => ({ file: path.basename(o.target), error: o.error ?? '' }));
+    for (const o of outcomes.filter(x => x.ok)) {
+      const cand = plan.find(p => p.cand.key === o.key)!.cand;
+      result.changes.push({ courseId: cand.courseId, kind: 'module', ref: cand.ref, change: o.action === 'update' ? 'changed' : 'new', title: cand.filename, detail: o.action === 'update' ? '파일 새 버전' : '파일 받음' });
+    }
+  }
+  log('드라이브 요약 파일 작성 중...');
+  stage.markdownWritten = writeMarkdown(driveRoot, semesterLabel, courseIds, new Date().toISOString()).length;
+  return stage;
 }
 
 async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Map<number, CalendarEvent[]>, result: SyncResult): Promise<Record<string, number>> {
@@ -214,7 +289,7 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
     if (!prev) push({ kind: 'task', ref: m.cmid, change: 'new', title: m.name, detail: m.modname });
     else {
       if (prevDue !== dl.due) push({ kind: 'task', ref: m.cmid, change: 'due_changed', title: m.name, detail: `${prevDue ?? '-'} → ${dl.due ?? '-'}` });
-      if (parsed && prev.submission_code !== parsed.submissionCode) push({ kind: 'task', ref: m.cmid, change: 'status_changed', title: m.name, detail: `${prev.submission_code ?? '-'} → ${parsed.submissionCode ?? '-'}` });
+      if (parsed && prev.submission_code !== null && prev.submission_code !== parsed.submissionCode) push({ kind: 'task', ref: m.cmid, change: 'status_changed', title: m.name, detail: `${prev.submission_code ?? '-'} → ${parsed.submissionCode ?? '-'}` });
       if (parsed && prev.intro_hash && prev.intro_hash !== introHash) push({ kind: 'task', ref: m.cmid, change: 'changed', title: m.name, detail: '설명/첨부 변경' });
     }
     if (dl.needsReview && !(prev?.needs_review)) push({ kind: 'task', ref: m.cmid, change: 'needs_review', title: m.name, detail: dl.reason ?? undefined });

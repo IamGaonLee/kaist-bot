@@ -97,6 +97,34 @@ export function listNotices(opts: { sinceSec?: number; course?: number[]; kind?:
     }));
 }
 
+export interface FileView {
+  key: string;
+  course: string;
+  source: string;
+  filename: string;
+  status: string;
+  statusLabel: string;
+  localPath: string | null;
+  length: number | null;
+  downloadedAt: string | null;
+  note: string | null;
+}
+
+const FILE_STATUS: Record<string, string> = { ok: '받음', pending: '대기', viewer_only: '뷰어 전용', missing: '없음', error: '오류' };
+
+export function listFiles(opts: { course?: number[]; onlyNew?: boolean }): FileView[] {
+  const db = openDb();
+  const lastRun = (db.prepare(`select max(id) r from sync_runs where finished_at is not null and status <> 'aborted'`).get() as { r: number | null }).r;
+  const rows = db.prepare(`select f.*, c.code from files f join courses c on c.id = f.course_id where c.active = 1 order by c.code, f.source, f.section, f.filename`).all() as Record<string, any>[];
+  return rows
+    .filter(r => !opts.course || opts.course.includes(r.course_id))
+    .filter(r => !opts.onlyNew || (lastRun !== null && r.downloaded_run === lastRun))
+    .map(r => ({
+      key: r.key, course: r.code, source: r.source, filename: r.filename, status: r.status, statusLabel: FILE_STATUS[r.status] ?? r.status,
+      localPath: r.local_path, length: r.length, downloadedAt: r.downloaded_at, note: r.note,
+    }));
+}
+
 export interface VideoView { cmid: number; course: string; section: string | null; name: string; url: string }
 
 export function listVideos(opts: { course?: number[] }): VideoView[] {

@@ -24,3 +24,19 @@ export const paths = {
 export function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
 }
+
+/** 사용자 설정 (%LOCALAPPDATA%\kaist-cli\config.json). 없으면 기본값 */
+export interface Settings {
+  /** 드라이브 동기화 폴더 안의 루트. 기본 G:\내 드라이브\KAIST */
+  driveRoot: string;
+}
+
+export function loadSettings(): Settings {
+  const file = path.join(home, 'config.json');
+  let user: Partial<Settings> = {};
+  if (fs.existsSync(file)) {
+    try { user = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) as Partial<Settings>; }
+    catch { throw new Error(`설정 파일을 읽지 못했습니다: ${file}`); }
+  }
+  return { driveRoot: process.env.KAIST_DRIVE_ROOT ?? user.driveRoot ?? 'G:\\내 드라이브\\KAIST' };
+}

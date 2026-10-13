@@ -7,7 +7,7 @@ import { SessionStore } from './klms/session-store.js';
 import { ensureSession, interactiveLogin, probe, resumeSession } from './klms/session.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta } from './store/db.js';
-import { listNotices, listTasks, listVideos } from './store/queries.js';
+import { listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
 import { runDoctor } from './sync/doctor.js';
 import { matchCourse, runSync, type SyncResult } from './sync/sync.js';
 import { nowSec, parseDuration } from './util/time.js';
@@ -146,18 +146,36 @@ function syncText(r: SyncResult): string {
     for (const c of shown) lines.push(`  [${CHANGE_LABEL[c.change]}] ${code.get(c.courseId) ?? c.courseId} ${c.kind === 'notice' ? '글' : c.kind === 'task' ? '과제' : c.detail ?? '활동'}: ${c.title}${c.detail && c.kind === 'task' && c.change !== 'new' ? ` (${c.detail})` : ''}`);
     if (interesting.length > shown.length) lines.push(`  … 외 ${interesting.length - shown.length}건 (--json으로 전체 확인)`);
   } else lines.push('변경 없음');
+  if (r.files) {
+    const f = r.files;
+    const mb = (b: number) => `${(b / 1024 / 1024).toFixed(1)} MB`;
+    if (f.awaitingConfirm) {
+      lines.push(`파일: 첫 다운로드 대기 — 새 파일 ${f.planned.download}개, 약 ${mb(f.planned.bytes)} → ${f.root}`);
+      lines.push('  진행하려면 `kaist sync --confirm-download`를 실행해 주세요 (한 번만 필요).');
+    } else {
+      lines.push(`파일: 새로 받음 ${f.downloaded}, 새 버전 ${f.updated}, 그대로 ${f.planned.same}${f.failed.length ? `, 실패 ${f.failed.length}` : ''} → ${f.root}`);
+      for (const x of f.failed) lines.push(`  실패: ${x.file} — ${x.error}`);
+    }
+    if (f.unavailable.length) {
+      lines.push(`  받지 않은 파일 ${f.unavailable.length}개 (뷰어 전용 등):`);
+      for (const u of f.unavailable.slice(0, 10)) lines.push(`    ${u.file} — ${u.reason}`);
+    }
+    lines.push(`  드라이브 요약 md ${f.markdownWritten}개 갱신`);
+  }
   if (Object.keys(r.unprocessed).length) lines.push(`처리하지 못한 활동 유형: ${Object.entries(r.unprocessed).map(([k, v]) => `${k} ${v}개`).join(', ')}`);
   for (const w of r.warnings) lines.push(`경고: ${w}`);
   return lines.join('\n');
 }
 
 program.command('sync')
-  .description('KLMS에서 과목 구성, 과제, 공지를 증분 수집 (S2: 파일 다운로드·캘린더 반영 제외)')
+  .description('KLMS에서 과목 구성, 과제, 공지, 강의자료를 증분 수집하고 드라이브 요약을 갱신')
   .option('--course <과목>', '특정 과목만 (코드, id, 이름 일부)')
+  .option('--no-files', '파일 다운로드와 드라이브 md 생성 건너뛰기')
+  .option('--confirm-download', '첫 전체 다운로드 승인 (한 번만)')
   .option('--no-login', '세션이 만료됐으면 로그인 창을 띄우지 않고 실패')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { course?: string; login: boolean; json?: boolean }) => {
-    const r = await runSync({ course: opts.course, interactive: opts.login, onStatus: status });
+  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; login: boolean; json?: boolean }) => {
+    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, onStatus: status });
     if (opts.json) console.log(JSON.stringify({ ok: r.status === 'ok', ...r }, null, 2));
     else console.log(syncText(r));
     if (r.status === 'aborted') process.exitCode = r.abortReason?.code === 'SESSION_EXPIRED' ? 2 : 1;
@@ -208,6 +226,20 @@ program.command('videos')
     requireSynced();
     const videos = listVideos({ course: courseIds(opts.course) });
     output(opts.json, { videos }, d => [`영상 링크 ${d.videos.length}개`, ...d.videos.map(v => `  ${v.course.padEnd(13)} ${v.section ?? ''} | ${v.name}\n      ${v.url}`)].join('\n'));
+  }));
+
+program.command('files')
+  .description('강의자료·첨부 파일 목록 (로컬 데이터)')
+  .option('--new', '마지막 sync에서 새로 받은 것만')
+  .option('--course <과목>', '특정 과목만')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { new?: boolean; course?: string; json?: boolean }) => {
+    requireSynced();
+    const files = listFiles({ course: courseIds(opts.course), onlyNew: opts.new });
+    output(opts.json, { files }, d => [
+      `파일 ${d.files.length}개${opts.new ? ' (마지막 sync에서 받음)' : ''}`,
+      ...d.files.map(f => `  ${f.course.padEnd(13)} [${f.statusLabel}] ${f.filename}${f.localPath ? `\n      ${f.localPath}` : ''}`),
+    ].join('\n'));
   }));
 
 program.command('doctor')

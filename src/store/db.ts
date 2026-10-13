@@ -46,6 +46,14 @@ create table if not exists changes (
   run_id integer not null, course_id integer, kind text not null, ref integer not null,
   change text not null, title text, detail text
 );
+create table if not exists files (
+  key text primary key, course_id integer not null, source text not null, ref integer not null,
+  url text not null, filename text not null, section integer,
+  etag text, last_modified text, length integer, updates_sig text,
+  local_path text, status text not null, note text,
+  first_seen_at text not null, downloaded_at text, downloaded_run integer, checked_at text
+);
+create index if not exists files_course on files(course_id);
 create index if not exists changes_run on changes(run_id);
 create index if not exists notices_course on notices(course_id, posted_at);
 create index if not exists tasks_due on tasks(due);

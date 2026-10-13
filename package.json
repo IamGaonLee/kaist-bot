@@ -9,13 +9,15 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/turndown": "^5.0.6",
     "playwright": "^1.64.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "turndown": "^7.2.4"
   },
   "bin": {
     "kaist": "dist/cli.js"
