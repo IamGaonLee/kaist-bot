@@ -1,7 +1,7 @@
 # S8 설계: KAIST Portal · ERP · 생활관 연결
 
 작성: 2026-10-14
-상태: 초안. 사용자 결정 3개를 받고 S8a 검증을 마친 뒤 구현한다.
+상태: 사용자 결정 3개와 S8a 검증 완료. S8a 구현 중.
 근거: 공개 자료 조사(Opus), 로그인 상태 화면 기록 분석(Opus, 구조만), 설계 판단(Fable)
 
 ## 배경 (관찰)
@@ -44,8 +44,8 @@
 |---|---|
 | KLMS | `/my/` |
 | 포털 | 가벼운 API의 JSON·리다이렉트 응답 |
-| ERP | `findNtcnCnt.do` |
-| kds | 401 |
+| ERP | `findViewSession.do`의 `isLogin` (S8a 검증으로 변경) |
+| kds | 배정 정보 500 |
 
 - `status --check`는 사이트 4개를 각각 보여준다.
 - `kaist sync`에 필수인 것은 KLMS뿐이다. 포털 세션이 끝났으면 포털 단계를 건너뛰고 "재로그인 필요"를 알린다.
@@ -114,6 +114,43 @@
 7. `recents`가 전체 게시판의 합집합인지, `pstNo`가 계속 증가하는지.
 8. `stulist` 결과와 OTL·KLMS 과목 목록 대조.
 9. `collegePlan`과 공개 학사일정 대조.
+
+## S8a 검증 결과 (2026-10-15, 값은 samples에만)
+
+스크립트: `scripts/phase0/s8a-verify.ts`(`--replay`는 저장한 쿠키로 HTTP 단계만), `s8a-collegeplan.ts`, `s8a-erp-probe.ts`
+
+- **연쇄 로그인:** 포털 로그인에서 2단계 인증 1회(13.7초). 그 뒤 KLMS(약 4초), ERP(약 2초), kds(약 3초)는 승인 없이 연쇄됐다. 4개 모두 성공.
+- **쿠키 (호스트 전용, 모두 세션 쿠키):**
+
+| 사이트 | 필요한 쿠키 |
+|---|---|
+| portal | `JSESSIONID` |
+| klms | `MoodleSession`, `PHPSESSID`, `9-rr`, `12-rr` |
+| erp | `JSESSIONID`, `locale`(`.erp.kaist.ac.kr`) |
+| kds | `JSESSIONID` |
+
+  - `sso.kaist.ac.kr` 쿠키와 상위 도메인 쿠키가 없어도 모두 재현됐다. 설계대로 SSO 쿠키는 저장하지 않는다.
+- **쿠키 + fetch 재현:** 시간표, 공지 recents, ERP 성적, kds 배정 정보, kds 일정, KLMS `/my/` 모두 브라우저 없이 동작했다.
+  - kds는 `AJAX: true`, `X-Requested-With` 헤더를 붙인다.
+  - ERP 성적 요청 본문은 화면 기록의 고정값(`_menuId`, `_pgmId`)으로 재현됐다.
+- **collegePlan:** 날짜 파라미터는 `bgngDt=YYYY-MM-DD&endDt=YYYY-MM-DD`이다(`YYYYMMDD`는 실패). 8~12월에 152건이 왔다.
+  - 응답의 날짜 필드는 `YYYYMMDD` 형식이다.
+  - 분류 `cldrNo` 38과 39는 같은 일정이 중복되어 있다. 57은 아직 확인하지 않았다.
+  - 공개 학사일정과 일치했다: 개강 8/31, 수강변경 8/24~9/7, 수강취소 마감 10/16, 중간고사 10/19~23, 기말 12/14~18, 종강 12/18.
+- **stulist:** 30분 칸을 과목·요일로 합치면 OTL과 6과목 모두 일치했다(요일, 시각, 강의실).
+- **만료 응답 (쿠키를 망가뜨림):**
+
+| 사이트 | 만료 신호 | 프로브 |
+|---|---|---|
+| 포털 | 401 | `POST widget/schedule/stulist`, 또는 가벼운 위젯 |
+| KLMS | 303 → `/login/index.php` | `/my/` (기존) |
+| ERP | `findViewSession.do`의 `dmLoginConfirm.isLogin`이 `"0"` (정상 `"1"`) | `findViewSession.do`. 응답에 이름 등이 있으므로 `isLogin`만 읽고 버린다 |
+| kds | 배정 정보 500 | `selectDormPostngInfo.do`의 HTML에 `info-ulbox`가 있는지 |
+
+  - ERP `findNtcnCnt.do`와 `checkLoginPolicy.do`는 만료돼도 `success=true`라 프로브로 쓸 수 없다. 표 1의 ERP 프로브를 `findViewSession.do`로 바꾼다.
+  - ERP 성적 요청은 만료되면 JSON 대신 HTML을 돌려준다. 성적 요청에서도 JSON이 아니면 만료로 본다.
+  - kds `semesterScheduleList.do`는 로그인 없이도 응답한다(공개 정보).
+- **미확인:** 사이트별 세션 수명(6), recents의 합집합 여부·pstNo 증가(7, S8c에서 확인).
 
 ## 단계와 완료 기준
 
