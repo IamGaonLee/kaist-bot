@@ -59,7 +59,7 @@ src/               CLI 본체 (S1부터)
   - `kaist doctor [과목] [--offline]`: 불변식 검사 (DB 변경 없음)
   - `kaist sync`는 파일도 받는다 (`--no-files`로 생략). 첫 전체 다운로드는 `--confirm-download`로 한 번 승인(완료됨). `kaist files [--new]`
 - 로컬 데이터: `%LOCALAPPDATA%\kaist-cli\kaist.db`(SQLite), `snapshots\`(최근 HTML 원문), `staging\`(다운로드 임시), `config.json`(선택: `driveRoot`)
-- 드라이브: `G:\내 드라이브\KAIST\2026-가을\<코드> <과목명>\{강의자료\<주차>, 과제\<이름>, 게시판첨부\<날짜 제목>}`, 바뀐 파일의 이전 버전은 같은 폴더 `_이전버전\`
+- 드라이브: `G:\내 드라이브\KAIST\2026-가을\<코드> <과목명>\{강의자료\<주차>, 과제\<이름>, 게시판첨부\<날짜 제목>}`, 바뀐 파일의 이전 버전은 같은 폴더 `_이전버전\`. 요약은 `_요약.md`/`_과목정보.md`(Claude용)와 같은 이름의 `.pdf`(사람용, sync마다 재생성)
 - 드라이브(G:)에는 스트림으로 바로 쓰지 않는다. 직후 크기가 늦게 반영돼 검증이 깨진다. staging에 받아 검증한 뒤 복사한다(`src/files/download.ts`)
 - 파서 코드: `src/klms/adapters/`, 셀렉터는 `src/klms/selectors.ts` 한 곳
 
