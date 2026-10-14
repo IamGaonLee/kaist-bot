@@ -163,7 +163,7 @@ function syncText(r: SyncResult): string {
       lines.push(`  받지 않은 파일 ${f.unavailable.length}개 (뷰어 전용 등):`);
       for (const u of f.unavailable.slice(0, 10)) lines.push(`    ${u.file} — ${u.reason}`);
     }
-    lines.push(`  드라이브 요약 md ${f.markdownWritten}개 갱신`);
+    lines.push(`  드라이브 요약 md ${f.markdownWritten}개, PDF ${f.pdfWritten}개 갱신`);
   }
   if (r.calendar) {
     const c = r.calendar;

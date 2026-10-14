@@ -19,6 +19,7 @@
   "dependencies": {
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
+    "marked": "^15.0.12",
     "turndown": "^7.2.4"
   },
   "bin": {

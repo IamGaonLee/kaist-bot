@@ -5,6 +5,7 @@ import { loadSettings } from '../config.js';
 import { BlockedError, KaistError, NotAvailableError, SessionExpiredError } from '../errors.js';
 import { collectCandidates, executeDownloads, planFiles, recordPlan } from '../files/download.js';
 import { writeMarkdown } from '../files/markdown.js';
+import { renderPdfs } from '../files/pdf.js';
 import { pushDeadlines, type PushResult } from '../cal/push.js';
 import { hasGoogleToken } from '../google/oauth.js';
 import { parseAssignPage } from '../klms/adapters/assign-page.js';
@@ -50,6 +51,7 @@ export interface FileStage {
   failed: { file: string; error: string }[];
   unavailable: { file: string; reason: string }[];
   markdownWritten: number;
+  pdfWritten: number;
 }
 
 export interface SyncResult {
@@ -202,6 +204,7 @@ async function fileStage(session: KlmsSession, semesterLabel: string, courseIds:
     downloaded: 0, updated: 0, failed: [],
     unavailable: plan.filter(p => p.action === 'unavailable').map(p => ({ file: p.cand.filename, reason: p.reason })),
     markdownWritten: 0,
+    pdfWritten: 0,
   };
   // "받지 않음"은 상태가 바뀌었을 때만 변경으로 기록 (매 sync 반복 방지)
   for (const p of plan.filter(x => x.action === 'unavailable' && x.prevStatus !== x.head?.status)) {
@@ -224,7 +227,17 @@ async function fileStage(session: KlmsSession, semesterLabel: string, courseIds:
     }
   }
   log('드라이브 요약 파일 작성 중...');
-  stage.markdownWritten = writeMarkdown(driveRoot, semesterLabel, courseIds, new Date().toISOString()).length;
+  const mdFiles = writeMarkdown(driveRoot, semesterLabel, courseIds, new Date().toISOString());
+  stage.markdownWritten = mdFiles.length;
+  // 사람이 볼 PDF: 학기 요약과 과목 정보만 (과제 설명.md는 제외). 실패해도 수집 결과는 유지
+  log('요약 PDF 만드는 중...');
+  try {
+    const pdf = await renderPdfs(mdFiles.filter(f => /_(요약|과목정보)\.md$/.test(f)));
+    stage.pdfWritten = pdf.written.length;
+    for (const [file, err] of pdf.failed) result.warnings.push(`PDF 생성 실패: ${path.basename(file)} — ${err}`);
+  } catch (e) {
+    result.warnings.push(`요약 PDF를 만들지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
+  }
   return stage;
 }
 
