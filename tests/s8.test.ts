@@ -101,7 +101,7 @@ test('쿠키 분리: 사이트 자기 호스트만, SSO·상위 도메인 제외
 });
 
 // ---------- S8b ----------
-import { isMajorPlan, parseCollegePlan, parseDormInfo, parseStulist, quietWindows, type PlanItem } from '../src/sites/parse.js';
+import { isMajorPlan, parseCollegePlan, parseDormInfo, parseStulist, type PlanItem } from '../src/sites/parse.js';
 import { campusGEvent, dormTargets, planTargets } from '../src/sites/campus.js';
 import { verifyEvent } from '../src/events/verify.js';
 
@@ -129,13 +129,6 @@ test('학사일정: 날짜 YYYYMMDD → YYYY-MM-DD, 주요 일정 선별', () =>
   assert.ok(!major('가을학기 중간고사', '39'), '대학원 사본 달력은 쓰지 않음');
   assert.ok(!major('가을학기 중간고사', '57'));
   assert.throws(() => parseCollegePlan({ data: [plan('x', '38', '2026-10-19')] }), /필드/);
-});
-
-test('수강신청 조용한 기간: 신청·변경만 (취소 기간은 제외)', () => {
-  const p = (title: string, s: string, e: string): PlanItem => ({ schdlNo: title, title, startDate: s, endDate: e, cldrNo: '38' });
-  const w = quietWindows([p('가을학기 수강신청 변경', '2026-08-24', '2026-09-07'), p('겨울학기 수강신청', '2026-11-23', '2026-11-26'),
-    p('학사과정 2006 이전 학번 및 학·석·박사과정 2009 이후 학번 가을학기 수강신청 취소', '2026-09-08', '2026-10-16'), p('여름학기 수강신청', '2026-06-01', '2026-06-03'), p('가을학기 중간고사', '2026-10-19', '2026-10-23')]);
-  assert.deepEqual(w.map(x => x.title), ['가을학기 수강신청 변경', '겨울학기 수강신청']);
 });
 
 test('학사·생활관 캘린더 일정: 여러 날 종일, 끝 날짜는 다음 날(배타)', () => {

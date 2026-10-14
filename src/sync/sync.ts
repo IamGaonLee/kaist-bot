@@ -89,8 +89,6 @@ export interface SyncOptions {
   calendar?: boolean;
   /** false면 포털·생활관 단계 생략 */
   portal?: boolean;
-  /** 수강신청 기간에도 포털·생활관에 접속 */
-  forcePortal?: boolean;
   onStatus?: (m: string) => void;
 }
 
@@ -190,9 +188,8 @@ async function runSyncLocked(opts: SyncOptions): Promise<SyncResult> {
     // 포털 시간표·학사일정, 생활관 (S8b). KLMS 결과와 별개로, 실패·만료는 경고로만
     if (opts.portal !== false && !opts.course) {
       try {
-        const c = await syncCampus({ runId, force: opts.forcePortal, calendar: opts.calendar !== false && hasGoogleToken(), onStatus: log });
+        const c = await syncCampus({ runId, calendar: opts.calendar !== false && hasGoogleToken(), onStatus: log });
         result.campus = c;
-        if (c.skippedReason) result.warnings.push(c.skippedReason);
         for (const site of ['portal', 'kds'] as const) {
           const label = site === 'portal' ? '포털' : '생활관';
           if (c.sites[site] === 'expired') result.warnings.push(`${label} 세션이 만료돼 건너뛰었습니다. \`kaist login\`(폰 승인 1회)으로 다시 로그인하세요.`);

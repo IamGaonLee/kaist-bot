@@ -81,13 +81,6 @@ export function isMajorPlan(p: PlanItem): boolean {
   return include.test(t) && !exclude.test(t);
 }
 
-/** 수강신청·변경·취소 "기간" (마감 하루짜리 포함). 이 기간에는 포털·ERP·kds에 자동 접속하지 않는다 */
-export function quietWindows(items: PlanItem[]): { title: string; startDate: string; endDate: string }[] {
-  return items
-    .filter(p => p.cldrNo === UNDERGRAD_CALENDAR && /수강신청(?!.*취소)/.test(p.title) && !/여름학기/.test(p.title))
-    .map(p => ({ title: p.title, startDate: p.startDate, endDate: p.endDate }));
-}
-
 // ---------- 생활관 (kds) ----------
 
 export interface DormInfo {

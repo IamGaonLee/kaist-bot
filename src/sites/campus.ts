@@ -1,5 +1,4 @@
 // S8b: 포털 시간표·학사일정, 생활관 배정 정보·일정 수집 → 로컬 DB, 주요 일정은 "KLMS" 캘린더 (설계 3·4·6절)
-// 수강신청·변경 기간(quietWindows)에는 포털·ERP·kds에 자동 접속하지 않는다 (--force로만).
 import { KaistError } from '../errors.js';
 import { gcal, type GEvent } from '../google/calendar-api.js';
 import { ensureCalendar } from '../cal/push.js';
@@ -8,20 +7,10 @@ import { getMeta, openDb, setMeta, tx } from '../store/db.js';
 import { formatKst, nowSec } from '../util/time.js';
 import { SiteHttp } from './http.js';
 import { KDS_HEADERS } from './session.js';
-import { isMajorPlan, parseCollegePlan, parseDormInfo, parseDormSchedule, parseStulist, quietWindows, type DormInfo, type PlanItem } from './parse.js';
+import { isMajorPlan, parseCollegePlan, parseDormInfo, parseDormSchedule, parseStulist, type DormInfo, type PlanItem } from './parse.js';
 
 export const todayKst = (sec = nowSec()) => new Date((sec + 9 * 3600) * 1000).toISOString().slice(0, 10);
 const addDays = (date: string, n: number) => new Date(Date.parse(date + 'T00:00:00Z') + n * 86400e3).toISOString().slice(0, 10);
-
-// ---------- quietWindows ----------
-
-export interface QuietWindow { title: string; startDate: string; endDate: string }
-
-/** 저장된 학사일정으로 계산. 오늘이 기간 안이면 그 기간 */
-export function activeQuietWindow(today = todayKst()): QuietWindow | null {
-  const rows = openDb().prepare('select schdl_no schdlNo, title, start_date startDate, end_date endDate, cldr_no cldrNo from college_plan').all() as unknown as PlanItem[];
-  return quietWindows(rows).find(w => w.startDate <= today && today <= w.endDate) ?? null;
-}
 
 // ---------- 저장 ----------
 
@@ -153,8 +142,6 @@ export const dormTargets = (d: DormInfo): CampusTarget[] => ([['moveIn', '생활
 
 export interface CampusResult {
   status: 'ok' | 'skipped' | 'partial';
-  skippedReason?: string;
-  quietWindow?: QuietWindow | null;
   sites: Record<'portal' | 'kds', 'ok' | 'expired' | 'no-session' | 'error' | 'skipped'>;
   timetable?: { slots: number };
   plan?: { items: number; major: number };
@@ -172,16 +159,9 @@ const yearRange = (today: string) => {
   return { from, to };
 };
 
-export async function syncCampus(opts: { runId: number | null; force?: boolean; calendar?: boolean; onStatus?: (m: string) => void }): Promise<CampusResult> {
+export async function syncCampus(opts: { runId: number | null; calendar?: boolean; onStatus?: (m: string) => void }): Promise<CampusResult> {
   const log = opts.onStatus ?? (() => {});
   const r: CampusResult = { status: 'ok', sites: { portal: 'skipped', kds: 'skipped' }, calendar: { created: [], updated: [], removed: [] }, errors: [], requests: 0 };
-  const quiet = activeQuietWindow();
-  r.quietWindow = quiet;
-  if (quiet && !opts.force) {
-    r.status = 'skipped';
-    r.skippedReason = `수강신청 기간(${quiet.title}, ${quiet.startDate}~${quiet.endDate})이라 포털·생활관에 자동 접속하지 않습니다. 필요하면 --force-portal`;
-    return r;
-  }
   const store = new SessionStore();
   const fail = (step: string, e: unknown) => {
     const err = e instanceof KaistError ? e : new KaistError('INTERNAL', e instanceof Error ? e.message : String(e));

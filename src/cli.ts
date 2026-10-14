@@ -5,7 +5,7 @@ import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
 import { ensureSession } from './klms/session.js';
 import { loginAll, probeSite, siteStatuses } from './sites/session.js';
-import { activeQuietWindow, dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
+import { dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta, setMeta } from './store/db.js';
 import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
@@ -133,12 +133,11 @@ school.command('list', { isDefault: true })
   .action(run(async (opts: { all?: boolean; from?: string; json?: boolean }) => {
     const from = opts.from ?? todayKst();
     const fetchedAt = getMeta('college_plan_fetched_at');
-    const data = { fetchedAt, items: listCollegePlan({ from, major: !opts.all }), calendar: listCampusEvents({ from }), quietWindow: fetchedAt ? activeQuietWindow() : null };
+    const data = { fetchedAt, items: listCollegePlan({ from, major: !opts.all }), calendar: listCampusEvents({ from }) };
     output(opts.json, data, d => d.items.length === 0 && !d.fetchedAt
       ? '학사일정이 아직 없습니다. `kaist login` 뒤 `kaist sync`로 받습니다.'
       : [`학사일정 (포털, ${d.fetchedAt ? fmtTime(d.fetchedAt) : '-'} 받음)${opts.all ? '' : ' — 주요 일정'}`,
-        ...d.items.map(p => `  ${p.startDate}${p.endDate !== p.startDate ? `~${p.endDate}` : ''} ${p.title}${opts.all && p.major ? ' ★' : ''}`),
-        ...(d.quietWindow ? [`지금은 수강신청 기간입니다 (${d.quietWindow.title}): sync가 포털·생활관에 접속하지 않습니다.`] : [])].join('\n'));
+        ...d.items.map(p => `  ${p.startDate}${p.endDate !== p.startDate ? `~${p.endDate}` : ''} ${p.title}${opts.all && p.major ? ' ★' : ''}`)].join('\n'));
   }));
 
 school.command('undo')
@@ -282,10 +281,9 @@ program.command('sync')
   .option('--no-calendar', '구글 캘린더 반영 생략')
   .option('--no-login', '세션이 만료됐으면 로그인 창을 띄우지 않고 실패')
   .option('--no-portal', '포털 시간표·학사일정, 생활관 단계 생략')
-  .option('--force-portal', '수강신청·변경 기간에도 포털·생활관에 접속')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; calendar: boolean; login: boolean; portal: boolean; forcePortal?: boolean; json?: boolean }) => {
-    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, calendar: opts.calendar, portal: opts.portal, forcePortal: opts.forcePortal, onStatus: status });
+  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; calendar: boolean; login: boolean; portal: boolean; json?: boolean }) => {
+    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, calendar: opts.calendar, portal: opts.portal, onStatus: status });
     if (opts.json) console.log(JSON.stringify({ ok: r.status === 'ok', ...r }, null, 2));
     else console.log(syncText(r));
     if (r.status === 'aborted') process.exitCode = r.abortReason?.code === 'SESSION_EXPIRED' ? 2 : 1;
