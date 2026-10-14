@@ -114,6 +114,15 @@ create table if not exists portal_notices (
   first_seen_sync_id integer, first_seen_at text not null, updated_at text not null
 );
 create index if not exists portal_notices_reg on portal_notices(reg_at);
+-- S8d 성적 (민감 정보: src/sites/grades.ts 밖에서 읽지 않는다. 학번은 저장하지 않음)
+create table if not exists grade_terms (
+  year text not null, term_code text not null, term_name text not null, gpa real, applied_credits real, earned_credits real,
+  fetched_at text not null, primary key (year, term_code)
+);
+create table if not exists grade_courses (
+  id integer primary key autoincrement, year text not null, term_code text not null, course_code text not null, section text,
+  name text not null, credits real not null, grade text not null, category text, fetched_at text not null
+);
 create index if not exists notices_course on notices(course_id, posted_at);
 create index if not exists tasks_due on tasks(due);
 `;

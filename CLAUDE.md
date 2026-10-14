@@ -15,7 +15,8 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - S8a 완료 (2026-10-15): `kaist login` 한 번(폰 승인 1회)으로 포털→KLMS·ERP·생활관 연쇄 로그인, `session.json` v2(사이트별 쿠키, SSO 쿠키 제외), `status --check` 사이트 4개, 허용 목록 HTTP 계층(`src/sites/`). 설계 `docs/portal-design.md`
 - S8b 완료 (2026-10-15): sync가 포털 시간표·학사일정, 생활관 배정 정보를 받는다. 학사 주요 일정 15건 캘린더 자동 등록(색 10, `[학사]`), 휴강·온라인 시각은 시간표 기준(그날 수업 1개일 때만)
 - S8c 완료 (2026-10-15): 포털 학사 공지(수강/학적·장학/복지·생활관 본문, 세미나 제목만) 증분 수집, `notices --source portal`, 드라이브 `_학교공지.md`(제목 목록). 연속 sync 중복 0
-- 다음: S8d 성적
+- S8d 완료 (2026-10-15): `kaist grades [--refresh]`. ERP는 `--refresh`일 때만 접속(sync는 접속 안 함), 로컬 DB에만 저장, 격리 테스트 통과. 누적 평점은 계산값(`computed: true`)
+- 다음: 카카오톡(Windows) 연결 설계
 
 ## 에이전트로 쓸 때 (학교생활 논의)
 
@@ -36,6 +37,7 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
   - 강의자료: `kaist files --json` (`--new`는 마지막 sync에서 받은 것), 영상 링크: `kaist videos --json`
   - 시간표: `kaist timetable --json` (포털, 정규 수업은 캘린더에 넣지 않음). 학사일정: `kaist school --json`(주요 일정, `--all` 전체). 생활관: `kaist dorm --json`(호실 포함, 드라이브·다른 곳에 옮기지 않는다)
   - 학사·생활관 자동 등록 되돌리기: `kaist school undo`(대상만) → `--yes`
+  - 성적: `kaist grades --json`(로컬). **사용자가 물을 때만** 조회하고 먼저 꺼내지 않는다. 결과를 파일·캘린더·드라이브·메모리 어디에도 쓰지 않고, `fetchedAt`(받은 시각)을 함께 말한다. 최신이 필요하면 사용자에게 알리고 `kaist grades --refresh --json`(ERP 접속, 만료면 로그인 창). 누적 평점은 계산값이라 "공식값은 ERP"라고 덧붙인다
   - 캘린더: `kaist cal list --json`
   - 학교 메일: `kaist mail list --academic --json`(과목 매핑·나에게 직접 온 메일, 본문 제외), 본문은 `kaist mail show <id> --json`. 옛 과목 번호는 `kaist mail alias ME361 ME.30061`. 대화 중 즉석 조회에는 Gmail 커넥터를 써도 되지만, **학사 일정 등록 근거는 `kaist events candidates`의 메일 후보만** 쓴다(원문 검증 사슬 유지)
 - **최신화가 필요하면 `kaist sync`를 제안하고, 실행 전에 사용자에게 알린다.** 세션이 만료됐으면 로그인 창이 뜨고 사용자가 비밀번호 입력과 폰 승인을 해야 한다. 세션이 살아 있으면 승인 없이 끝난다. 확인하려면 `kaist status --check`.
@@ -72,6 +74,7 @@ src/               CLI 본체 (S1부터)
   - `kaist login [--force] [--only klms|portal|erp|kds]`, `kaist status [--check]`(사이트별 유효/만료), `kaist courses [--refresh] [--no-login]`
   - `kaist sync [--course X] [--no-login] [--no-portal]`: KLMS 접속. 이어서 포털·생활관(세션이 있을 때, 만료면 경고만). 과목 페이지, updates_since, 캘린더(사이트 전체 월별), 과제 페이지(새것·변경·마감 임박만), 게시판 새 글
   - `kaist timetable`, `kaist school [list|undo]`, `kaist dorm`: 로컬 DB만
+  - `kaist grades [--refresh] [--no-login]`: 기본은 로컬, `--refresh`만 ERP 접속
   - `kaist assignments [--due 7d] [--all] [--course X]`, `kaist notices [--source klms|portal] [--board X] [--since 3d] [--kind notice|qna|board] [--body]`, `kaist videos`: 로컬 DB만
   - `kaist doctor [과목] [--offline]`: 불변식 검사 (DB 변경 없음)
   - `kaist sync`는 파일도 받는다 (`--no-files`로 생략). 첫 전체 다운로드는 `--confirm-download`로 한 번 승인(완료됨). `kaist files [--new]`

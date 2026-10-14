@@ -7,6 +7,7 @@ import { ensureSession } from './klms/session.js';
 import { loginAll, probeSite, siteStatuses } from './sites/session.js';
 import { dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
 import { listPortalNotices } from './sites/notices.js';
+import { listGrades, refreshGrades } from './sites/grades.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta, setMeta } from './store/db.js';
 import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
@@ -165,6 +166,23 @@ program.command('dorm')
         `  학기 ${d.info.semester ?? '-'}, 생활관 ${d.info.dorm ?? '-'}`,
         `  입사 ${d.info.moveIn ?? '-'}, 퇴사 ${d.info.moveOut ?? '-'}, 거주기간 만료 ${d.info.residenceEnd ?? '-'}`,
         ...(d.schedule as { title: string; startDate: string | null }[]).map(s => `  일정 ${s.startDate ?? '-'} ${s.title}`)].join('\n'));
+  }));
+
+program.command('grades')
+  .description('성적 (기본은 로컬 데이터). --refresh일 때만 ERP에 접속. 결과는 화면에만 (드라이브·요약·로그에 남기지 않음)')
+  .option('--refresh', 'ERP에서 다시 받기')
+  .option('--no-login', '--refresh 때 ERP 세션이 만료됐으면 로그인 창을 띄우지 않고 실패')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { refresh?: boolean; login: boolean; json?: boolean }) => {
+    if (opts.refresh) await refreshGrades({ interactive: opts.login, onStatus: status });
+    const g = listGrades();
+    output(opts.json, g, d => !d.fetchedAt
+      ? '성적을 아직 받지 않았습니다. `kaist grades --refresh`로 ERP에서 받습니다.'
+      : [`성적 (ERP, ${fmtTime(d.fetchedAt)} 받음)`,
+        ...d.terms.flatMap(t => [`${t.termName}: 평점 ${t.gpa ?? '-'}, 신청 ${t.appliedCredits ?? '-'}학점, 취득 ${t.earnedCredits ?? '-'}학점`,
+          ...t.courses.map(c => `  ${c.grade.padEnd(3)} ${String(c.credits).padStart(3)}학점  ${c.courseCode}${c.section ? `(${c.section})` : ''} ${c.name}${c.category ? ` [${c.category}]` : ''}`)]),
+        ...(d.otherCourses.length ? ['기타 (학기 평점 없음):', ...d.otherCourses.map(c => `  ${c.grade.padEnd(3)} ${String(c.credits).padStart(3)}학점  ${c.courseCode} ${c.name}`)] : []),
+        `누적 평점(계산값) ${d.cumulative.gpa ?? '-'} / ${d.cumulative.credits}학점 — ${d.cumulative.note}`].join('\n'));
   }));
 
 program.command('courses')
