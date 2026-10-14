@@ -14,7 +14,7 @@ import { formatKst, nowSec, parseDuration } from './util/time.js';
 import { ensureCalendar, pushDeadlines } from './cal/push.js';
 import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, parseReminders, updateEvent } from './cal/manual.js';
 import { googleLogin, hasGmailScope } from './google/oauth.js';
-import { listMails, showMail, syncMail } from './mail/sync.js';
+import { listMails, rematchMailCourses, showMail, syncMail } from './mail/sync.js';
 import { loadSettings } from './config.js';
 import { writeMarkdown } from './files/markdown.js';
 import { renderPdfs } from './files/pdf.js';
@@ -581,7 +581,8 @@ mail.command('alias')
     const m = JSON.parse(getMeta('mail_course_aliases') ?? '{}') as Record<string, string>;
     m[alias] = code;
     setMeta('mail_course_aliases', JSON.stringify(m));
-    output(o.json, { aliases: m }, () => `별칭 ${alias} → ${code} 저장. 다음 mail sync부터 새 메일에 적용됩니다.`);
+    const changed = rematchMailCourses();
+    output(o.json, { aliases: m, rematched: changed }, d => `별칭 ${alias} → ${code} 저장. 저장된 메일 ${d.rematched}통의 과목 매핑이 바뀌었습니다.`);
   }));
 
 program.command('doctor')

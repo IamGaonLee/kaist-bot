@@ -1,11 +1,10 @@
 // 학교 메일 동기화 (S7): Gmail에서 KAIST 관련 메일만 가져와 로컬 DB에 저장한다.
 // 사용자 결정: 본문은 전부 저장(보존 기한 없음), 개인 Gmail 메일은 가져오지 않음.
-import { attachmentNames, bodyText, getMessage, header, listMessageIds, type GmailMessage } from '../google/gmail-api.js';
+import { attachmentNames, bodyText, getMessage, header, listMessageIds } from '../google/gmail-api.js';
 import { getMeta, openDb, setMeta, tx } from '../store/db.js';
 
 /** KAIST에서 전달된 메일 = 발신·수신·참조에 kaist.ac.kr 주소가 있는 메일 */
 export const KAIST_QUERY = '{from:kaist.ac.kr to:kaist.ac.kr cc:kaist.ac.kr}';
-const CONCURRENCY = 4;
 
 export interface MailSyncResult { fetched: number; newMails: number; direct: number; courseMatched: number; from: string; myAddress: string | null }
 
@@ -36,22 +35,13 @@ export function matchCourse(subject: string, body: string, courses: CourseKey[])
 }
 
 /** 본인 KAIST 주소: 받는 사람이 한 명뿐인 메일에서 가장 많이 나온 kaist 주소 */
-function inferMyAddress(msgs: GmailMessage[]): string | null {
+function inferMyAddress(rows: { to_addrs: string }[]): string | null {
   const count = new Map<string, number>();
-  for (const m of msgs) {
-    const to = addrs(header(m, 'To'));
+  for (const m of rows) {
+    const to = (m.to_addrs ?? '').split(',').filter(Boolean);
     if (to.length === 1 && to[0]!.endsWith('@kaist.ac.kr')) count.set(to[0]!, (count.get(to[0]!) ?? 0) + 1);
   }
   return [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-}
-
-async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) { const k = i++; out[k] = await fn(items[k]!); }
-  }));
-  return out;
 }
 
 export async function syncMail(opts: { runId: number | null; since?: number; onStatus?: (m: string) => void }): Promise<MailSyncResult> {
@@ -70,29 +60,40 @@ export async function syncMail(opts: { runId: number | null; since?: number; onS
   const ids = await listMessageIds(q);
   const known = new Set((db.prepare('select id from mails').all() as { id: string }[]).map(r => r.id));
   const fresh = ids.filter(id => !known.has(id));
-  if (fresh.length) opts.onStatus?.(`새 메일 ${fresh.length}통 받는 중...`);
-  const msgs = await pool(fresh, CONCURRENCY, id => getMessage(id));
-
-  let my = getMeta('mail_my_address');
-  if (!my) { my = inferMyAddress(msgs); if (my) setMeta('mail_my_address', my); }
-
-  const res: MailSyncResult = { fetched: ids.length, newMails: 0, direct: 0, courseMatched: 0, from: d, myAddress: my };
+  const res: MailSyncResult = { fetched: ids.length, newMails: 0, direct: 0, courseMatched: 0, from: d, myAddress: getMeta('mail_my_address') };
   const ins = db.prepare(`insert into mails(id, thread_id, received_at, from_addr, from_name, to_addrs, cc_addrs, subject, snippet, body_text, attachments_json, label_ids,
       course_id, course_match, direct, first_seen_sync_id, created_at) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do nothing`);
-  tx(() => {
-    for (const m of msgs) {
-      const subject = header(m, 'Subject') ?? '';
-      const body = bodyText(m);
-      const to = addrs(header(m, 'To'));
-      const cc = addrs(header(m, 'Cc'));
-      const direct = !!my && (to.includes(my) || cc.includes(my));
-      const course = matchCourse(subject, body, keys);
-      const from = header(m, 'From');
-      const r = ins.run(m.id, m.threadId, Math.floor(Number(m.internalDate) / 1000), addrs(from)[0] ?? null, nameOf(from), to.join(','), cc.join(','), subject,
-        m.snippet ?? null, body, JSON.stringify(attachmentNames(m)), (m.labelIds ?? []).join(','), course?.id ?? null, course?.how ?? null, direct ? 1 : 0, opts.runId, new Date().toISOString());
-      if (r.changes) { res.newMails++; if (direct) res.direct++; if (course) res.courseMatched++; }
+  // 한 통씩 받는 즉시 저장한다 (중간에 한도·오류로 멈춰도 받은 것은 남는다)
+  let n = 0;
+  for (const id of fresh) {
+    n++;
+    if (n % 50 === 1) opts.onStatus?.(`새 메일 받는 중 ${n}/${fresh.length}...`);
+    const m = await getMessage(id);
+    const subject = header(m, 'Subject') ?? '';
+    const body = bodyText(m);
+    const to = addrs(header(m, 'To'));
+    const cc = addrs(header(m, 'Cc'));
+    const my = res.myAddress;
+    const direct = !!my && (to.includes(my) || cc.includes(my));
+    const course = matchCourse(subject, body, keys);
+    const from = header(m, 'From');
+    const r = ins.run(m.id, m.threadId, Math.floor(Number(m.internalDate) / 1000), addrs(from)[0] ?? null, nameOf(from), to.join(','), cc.join(','), subject,
+      m.snippet ?? null, body, JSON.stringify(attachmentNames(m)), (m.labelIds ?? []).join(','), course?.id ?? null, course?.how ?? null, direct ? 1 : 0, opts.runId, new Date().toISOString());
+    if (r.changes) { res.newMails++; if (direct) res.direct++; if (course) res.courseMatched++; }
+  }
+
+  // 본인 주소를 아직 모르면 저장된 메일에서 추정하고 '직접 온 메일' 표시를 다시 매긴다
+  if (!res.myAddress) {
+    const my = inferMyAddress(db.prepare(`select to_addrs from mails`).all() as { to_addrs: string }[]);
+    if (my) {
+      setMeta('mail_my_address', my);
+      res.myAddress = my;
+      tx(() => {
+        db.prepare(`update mails set direct = 1 where (',' || to_addrs || ',' || cc_addrs || ',') like ?`).run(`%,${my},%`);
+      });
+      res.direct = (db.prepare(`select count(*) n from mails where direct = 1 and first_seen_sync_id is ?`).get(opts.runId) as { n: number }).n;
     }
-  });
+  }
   setMeta('mail_last_sync_at', new Date().toISOString());
   return res;
 }
@@ -124,4 +125,21 @@ export function listMails(opts: { sinceSec?: number; course?: number[]; direct?:
 export function showMail(id: string): MailView | null {
   const r = openDb().prepare(`select m.*, c.code from mails m left join courses c on c.id = m.course_id where m.id = ?`).get(id) as Record<string, any> | undefined;
   return r ? view(r, true) : null;
+}
+
+/** 별칭을 바꾼 뒤 저장된 메일의 과목 매핑을 다시 계산 (KLMS·Gmail 접속 없음) */
+export function rematchMailCourses(): number {
+  const db = openDb();
+  const courses = db.prepare('select id, code, name from courses where active = 1').all() as { id: number; code: string; name: string }[];
+  const aliases = JSON.parse(getMeta('mail_course_aliases') ?? '{}') as Record<string, string>;
+  const keys: CourseKey[] = courses.map(c => ({ ...c, aliases: Object.entries(aliases).filter(([, v]) => v === c.code).map(([k]) => k) }));
+  const up = db.prepare('update mails set course_id = ?, course_match = ? where id = ?');
+  let changed = 0;
+  tx(() => {
+    for (const m of db.prepare('select id, subject, body_text, course_id from mails').all() as Record<string, any>[]) {
+      const c = matchCourse(m.subject ?? '', m.body_text ?? '', keys);
+      if ((c?.id ?? null) !== m.course_id) { up.run(c?.id ?? null, c?.how ?? null, m.id); changed++; }
+    }
+  });
+  return changed;
 }

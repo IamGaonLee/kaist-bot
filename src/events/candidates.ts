@@ -26,6 +26,12 @@ export interface Snippet { snippet: string; context: string; kindHint: Kind; key
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 
+/** 답장·전달 메일에서 인용된 이전 메일을 잘라낸다 (Dooray: "-----Original Message-----"). 순수 함수 */
+export function stripQuoted(body: string): string {
+  const cut = body.search(/-{3,}\s*Original Message\s*-{3,}|-{3,}\s*원본 메(일|시지)\s*-{3,}|-{3,}\s*Forwarded message\s*-{3,}|^\s*>|^On .{1,120} wrote:\s*$|^\s*보낸 사람\s*:|^From:\s.+\n(Sent|Date|보낸 날짜):/mi);
+  return cut > 0 ? body.slice(0, cut) : body;
+}
+
 /** 텍스트에서 후보 구간 찾기 (순수 함수). semesterYear와 다른 연도만 적힌 구간은 past */
 export function findSnippets(text: string, semesterYear: number, opts: { file?: boolean } = {}): Snippet[] {
   const t = norm(text);
@@ -80,7 +86,7 @@ export async function scanCandidates(runId: number, semesterYear: number, onStat
   // 학교 메일 (S7): 과목에 매핑됐거나 나에게 직접 온 메일만 (학교 전체 메일링의 '시험' 단어는 잡음)
   for (const m of db.prepare(`select id, subject, body_text, received_at, course_id from mails where (course_id is not null or direct = 1) and body_text is not null`).all() as Record<string, any>[]) {
     sources.push({ type: 'mail', id: m.id, courseId: m.course_id, title: `메일: ${m.subject}`, url: `https://mail.google.com/mail/u/0/#all/${m.id}`, postedAt: m.received_at, text: `${m.subject}
-${m.body_text}` });
+${stripQuoted(m.body_text)}` });
   }
   const { texts, noText } = await fileTexts(onStatus);
   for (const f of texts) {
@@ -101,7 +107,8 @@ ${m.body_text}` });
   for (const src of sources) {
     for (const sn of findSnippets(src.text, semesterYear, { file: src.type === 'file' })) {
       const past = sn.past || !!src.pastFile;
-      const r = ins.run(src.type, src.id, src.courseId, sn.snippet, sn.context, sha1(src.type, src.id, sn.snippet), sn.kindHint, sn.keywords.join(','), sn.dateHints.join(','),
+      // 메일은 같은 문장이 스레드의 여러 메일에 반복되므로 출처 id 없이 문장으로만 중복을 가린다
+      const r = ins.run(src.type, src.id, src.courseId, sn.snippet, sn.context, src.type === 'mail' ? sha1('mail', sn.snippet) : sha1(src.type, src.id, sn.snippet), sn.kindHint, sn.keywords.join(','), sn.dateHints.join(','),
         src.title, src.url, src.postedAt, runId, past ? 'past' : 'new', past ? (src.pastFile ? '지난 학기 자료로 보이는 파일' : '다른 연도만 적힌 구간') : null);
       if (r.changes > 0) { if (past) res.pastSkipped++; else res.newCandidates++; }
     }

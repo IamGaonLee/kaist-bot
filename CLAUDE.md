@@ -11,7 +11,8 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - S4 완료 (2026-10-14): 구글 "KLMS" 캘린더 마감 15개 + 시험 8건(수동). OAuth는 테스트 상태라 7일마다 `kaist cal login` 필요. 휴대폰 확인 완료
 - S5 완료 (2026-10-14): 에이전트용 출력 다듬기(`changes`, 과제 경로·남은 시간, 신선도), 수강 취소 과목 처리. 대화 시나리오 4개는 사용자가 생략하고 넘어감(실사용 중 확인)
 - S6 완료 (2026-10-14): 학사 일정 추출 `kaist events` (후보·검사·A/B등급·undo), 기존 시험 8건 이전, 첫 처리로 휴강·퀴즈·발표·온라인 13건 추가(A 1건 자동, B 12건 확인), `kaist summary`
-- 다음: Dooray 메일 → Portal
+- S7 완료 (2026-10-14): 학교 메일 (Dooray→Gmail 자동 전달, `gmail.readonly`). 8/31 이후 368통 저장, 후보 규칙(인용 잘라내기·중복 합치기·옛 과목번호 별칭). `docs/mail-design.md`
+- 다음: Portal (새 설계 문서 먼저)
 - 사용자 할 일:
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
 
@@ -33,6 +34,7 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
   - 공지: `kaist notices --since 3d --json` (본문이 필요하면 `--body`)
   - 강의자료: `kaist files --json` (`--new`는 마지막 sync에서 받은 것), 영상 링크: `kaist videos --json`
   - 캘린더: `kaist cal list --json`
+  - 학교 메일: `kaist mail list --academic --json`(과목 매핑·나에게 직접 온 메일, 본문 제외), 본문은 `kaist mail show <id> --json`. 옛 과목 번호는 `kaist mail alias ME361 ME.30061`. 대화 중 즉석 조회에는 Gmail 커넥터를 써도 되지만, **학사 일정 등록 근거는 `kaist events candidates`의 메일 후보만** 쓴다(원문 검증 사슬 유지)
 - **최신화가 필요하면 `kaist sync`를 제안하고, 실행 전에 사용자에게 알린다.** 세션이 만료됐으면 로그인 창이 뜨고 사용자가 비밀번호 입력과 폰 승인을 해야 한다. 세션이 살아 있으면 승인 없이 끝난다. 확인하려면 `kaist status --check`.
   - 종료 코드 2(`SESSION_EXPIRED`): `--no-login`으로 돌렸는데 세션이 만료된 경우다. 사용자에게 로그인할지 묻는다.
   - sync 결과의 `changes`(새 과제, 마감 변경, 새 글, 새 자료)를 그대로 브리핑에 쓴다. `needs_review`가 있으면 꼭 알린다(마감 정보가 서로 달라 KLMS에서 직접 확인해야 함).

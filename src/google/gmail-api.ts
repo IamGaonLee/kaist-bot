@@ -4,18 +4,32 @@ import { accessToken, hasGmailScope } from './oauth.js';
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** 요청 간 최소 간격 (분당 사용량 한도 대비, S7 첫 실행에서 한도 초과 확인) */
+const MIN_INTERVAL_MS = 120;
+let lastAt = 0;
+
 async function call<T>(pathAndQuery: string): Promise<T> {
   if (!hasGmailScope()) throw new KaistError('GOOGLE_REAUTH', 'Gmail 읽기 권한이 없습니다. `kaist google login`으로 다시 승인해 주세요 (캘린더와 Gmail을 함께 묻습니다).');
-  const token = await accessToken();
-  const r = await fetch(API + pathAndQuery, { headers: { Authorization: `Bearer ${token}` } });
-  const j = await r.json().catch(() => ({})) as any;
-  if (!r.ok) {
-    const msg = j?.error?.message ?? r.statusText;
+  for (let attempt = 0; ; attempt++) {
+    const wait = lastAt + MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastAt = Date.now();
+    const token = await accessToken();
+    const r = await fetch(API + pathAndQuery, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json().catch(() => ({})) as any;
+    if (r.ok) return j as T;
+    const msg = String(j?.error?.message ?? r.statusText);
+    // 사용량 한도: 잠시 기다렸다 다시 (2, 4, 8, 16, 32, 60초)
+    if ((r.status === 429 || r.status === 403) && /quota|rate ?limit/i.test(msg) && attempt < 6) {
+      await sleep(Math.min(60_000, 2000 * 2 ** attempt));
+      continue;
+    }
     if (r.status === 403 && /has not been used|disabled/i.test(msg)) throw new KaistError('GMAIL_API_DISABLED', 'Google Cloud 콘솔에서 Gmail API가 꺼져 있습니다. 프로젝트에서 Gmail API를 "사용"으로 바꿔 주세요.');
+    if (r.status === 429 || /quota|rate ?limit/i.test(msg)) throw new KaistError('GMAIL_QUOTA', `Gmail 사용량 한도에 걸려 중단했습니다. 받은 메일까지는 저장됐습니다. 잠시 뒤 다시 실행해 주세요. (${msg})`);
     if (r.status === 401 || r.status === 403) throw new KaistError('GOOGLE_REAUTH', `Gmail 접근이 거부됐습니다 (${msg}). \`kaist google login\`을 다시 실행해 주세요.`);
     throw new KaistError('GMAIL_ERROR', `Gmail HTTP ${r.status}: ${msg}`);
   }
-  return j as T;
 }
 
 export interface GmailPart { mimeType?: string; filename?: string; headers?: { name: string; value: string }[]; body?: { data?: string; size?: number; attachmentId?: string }; parts?: GmailPart[] }

@@ -96,3 +96,10 @@ test('메일 과목 매핑: 코드·이름·별칭, 여러 과목이면 제목 �
   assert.equal(matchCourse('MAS.20050 시험', 'ME.30061 참고', courses)?.id, 2);
   assert.equal(matchCourse('ME3006 seminar', '', courses), null);
 });
+
+test('메일 인용 잘라내기', async () => {
+  const { stripQuoted } = await import('../src/events/candidates.js');
+  assert.equal(stripQuoted('퀴즈는 10/20입니다.\n\n-----Original Message-----From: x\n시험 10/19'), '퀴즈는 10/20입니다.\n\n');
+  assert.equal(stripQuoted('본문\n> 인용\n'), '본문\n');
+  assert.equal(stripQuoted('인용 없음'), '인용 없음');
+});
