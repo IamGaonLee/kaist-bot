@@ -511,7 +511,7 @@ program.command('summary')
     if (!cache) throw new KaistError('NO_LOCAL_DATA', '로컬 과목 목록이 없습니다.');
     const { driveRoot } = loadSettings();
     const md = writeMarkdown(driveRoot, cache.semester.label, cache.courses.map(c => c.id), getMeta('last_sync_at')!);
-    const pdf = o.pdf ? await renderPdfs(md.filter(f => /_(요약|과목정보)\.md$/.test(f))) : { written: [], failed: [] };
+    const pdf = o.pdf ? await renderPdfs(md.filter(f => /_(요약|과목정보|학교메일)\.md$/.test(f))) : { written: [], failed: [] };
     output(o.json, { markdown: md.length, pdf: pdf.written.length, failed: pdf.failed }, d =>
       `요약을 다시 만들었습니다: md ${d.markdown}개, PDF ${d.pdf}개${d.failed.length ? `, PDF 실패 ${d.failed.length}개` : ''} → ${driveRoot}`);
   }));

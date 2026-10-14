@@ -257,7 +257,7 @@ async function fileStage(session: KlmsSession, semesterLabel: string, courseIds:
   // 사람이 볼 PDF: 학기 요약과 과목 정보만 (과제 설명.md는 제외). 실패해도 수집 결과는 유지
   log('요약 PDF 만드는 중...');
   try {
-    const pdf = await renderPdfs([...mdFiles.filter(f => /_(요약|과목정보)\.md$/.test(f)), ...droppedMd.filter(f => fs.existsSync(f))]);
+    const pdf = await renderPdfs([...mdFiles.filter(f => /_(요약|과목정보|학교메일)\.md$/.test(f)), ...droppedMd.filter(f => fs.existsSync(f))]);
     stage.pdfWritten = pdf.written.length;
     for (const [file, err] of pdf.failed) result.warnings.push(`PDF 생성 실패: ${path.basename(file)} — ${err}`);
   } catch (e) {

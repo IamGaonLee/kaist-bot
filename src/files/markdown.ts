@@ -8,6 +8,25 @@ import { openDb } from '../store/db.js';
 import { formatKst, nowSec } from '../util/time.js';
 import { courseDir, semesterDir } from './layout.js';
 import { taskFolder } from './download.js';
+import { stripQuoted } from '../events/candidates.js';
+
+/** 자동 알림 발신자 (드라이브 _학교메일에서 제외, 사용자 결정) */
+const AUTOMATED = /no-?reply|notification|mailer-daemon|github\.com|donotreply|ubl_main/i;
+const decode = (s: string) => s.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&amp;/g, '&');
+
+/** 메일 하나를 md로: 제목·보낸 사람·첨부·Gmail 링크 + 본문 인용 블록 (인용된 이전 메일은 잘라냄) */
+function mailBlock(m: Record<string, any>, max = 3000): string[] {
+  let body = decode(stripQuoted(m.body_text ?? '')).replace(/\r/g, '').replace(/[ \t ]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (body.length > max) body = body.slice(0, max) + ' …(줄임, 전체는 Gmail에서)';
+  const atts = (JSON.parse(m.attachments_json ?? '[]') as { filename: string }[]).map(a => a.filename);
+  return [
+    `### ${m.subject || '(제목 없음)'} — ${formatKst(m.received_at)}`, '',
+    `- 보낸 사람: ${m.from_name ?? ''} <${m.from_addr ?? ''}>`,
+    ...(atts.length ? [`- 첨부: ${atts.join(', ')}`] : []),
+    `- Gmail: https://mail.google.com/mail/u/0/#all/${m.id}`, '',
+    ...(body ? body.split('\n').map(l => `> ${l}`) : ['> (본문 없음)']), '',
+  ];
+}
 
 const td = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
 // 교수가 마감을 고칠 때 취소선을 쓴다 ("<del>October 19th</del> October 17th") → 지워진 값이 남아 보이지 않게 ~~ ~~로 보존
@@ -119,6 +138,11 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
       }
       if (atts.length) L.push('');
     }
+    // 과목 메일 (S7): 최신순
+    const cm = db.prepare(`select * from mails where course_id = ? order by received_at desc`).all(cid) as Record<string, any>[];
+    L.push('## 메일', '');
+    if (cm.length === 0) L.push('과목으로 연결된 메일 없음', '');
+    for (const m of cm) L.push(...mailBlock(m));
     write(path.join(cdir, '_과목정보.md'), L.join('\n'));
     written.push(path.join(cdir, '_과목정보.md'));
   }
@@ -168,6 +192,25 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
   if (newFiles.length === 0) S.push('없음', '');
   for (const f of newFiles.slice(0, 50)) S.push(`- ${f.code}: [${f.filename}](${rel(sdir, f.local_path)})`);
   if (newFiles.length > 50) S.push(`- … 외 ${newFiles.length - 50}개`);
+  // 나에게 직접 온 메일(자동 알림 제외)과 학교 전체 메일 목록 → _학교메일.md. 요약에는 최근 7일 제목만
+  const direct = (db.prepare(`select * from mails where direct = 1 order by received_at desc`).all() as Record<string, any>[]).filter(m => !AUTOMATED.test(m.from_addr ?? ''));
+  const broadcast = db.prepare(`select * from mails where direct = 0 and course_id is null and received_at >= ? order by received_at desc`).all(now - 30 * 86400) as Record<string, any>[];
+  if ((db.prepare('select count(*) n from mails').get() as { n: number }).n > 0) {
+    const M = [`# ${semesterLabel} 학교 메일`, '', stamp(lastSync), '',
+      '> Dooray에서 Gmail로 전달된 KAIST 메일 중 나에게 직접 온 메일(자동 알림 제외)입니다. 과목 메일은 각 과목의 _과목정보에 있습니다.', '', '## 나에게 온 메일', ''];
+    if (direct.length === 0) M.push('없음', '');
+    for (const m of direct) M.push(...mailBlock(m));
+    M.push('## 학교·학과 전체 메일 (최근 30일, 제목만)', '');
+    if (broadcast.length === 0) M.push('없음');
+    for (const m of broadcast) M.push(`- ${formatKst(m.received_at)} ${m.from_name ?? m.from_addr ?? ''}: ${m.subject ?? ''}`);
+    write(path.join(sdir, '_학교메일.md'), M.join('\n'));
+    written.push(path.join(sdir, '_학교메일.md'));
+    const recent = direct.filter(m => m.received_at >= now - 7 * 86400);
+    S.push('## 최근 7일 나에게 온 메일', '');
+    if (recent.length === 0) S.push('없음');
+    for (const m of recent) S.push(`- ${formatKst(m.received_at)} ${m.from_name ?? m.from_addr ?? ''}: ${m.subject ?? ''}`);
+    S.push('', `→ 전체: [_학교메일](${encodeURIComponent('_학교메일.md')})`, '');
+  }
   S.push('', '## 과목', '');
   const courses = db.prepare('select * from courses where active = 1 order by code').all() as { id: number; code: string; name: string }[];
   for (const c of courses) S.push(`- [${c.code} ${c.name}](${rel(sdir, path.join(courseDir(root, semesterLabel, c), '_과목정보.md'))})`);
