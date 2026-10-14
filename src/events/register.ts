@@ -90,7 +90,8 @@ export async function addSchoolEvent(o: AddOptions): Promise<AddResult> {
     if (!o.fromCandidate) throw new KaistError('BAD_ARGS', '--from-candidate <후보 id> 또는 --manual이 필요합니다.');
     const c = db.prepare('select * from event_candidates where id = ?').get(o.fromCandidate) as Record<string, any> | undefined;
     if (!c) throw new KaistError('NO_CANDIDATE', `후보 ${o.fromCandidate}을(를) 찾지 못했습니다.`);
-    if (c.course_id !== course.id) throw new KaistError('BAD_ARGS', `후보 ${o.fromCandidate}은(는) ${course.code} 과목의 글이 아닙니다.`);
+    // 과목을 모르는 후보(학과 공지 메일 등)는 에이전트가 정한 과목을 쓴다. 메일 출처라 B등급(확인 필요)이다
+    if (c.course_id !== null && c.course_id !== course.id) throw new KaistError('BAD_ARGS', `후보 ${o.fromCandidate}은(는) ${course.code} 과목의 글이 아닙니다.`);
     context = c.context; sourceType = c.source_type; sourceId = c.source_id; sourceUrl = c.source_url;
   }
   const existing = db.prepare('select id from school_events where course_id = ? and kind = ? and date = ?').get(course.id, o.kind, o.date) as { id: number } | undefined;

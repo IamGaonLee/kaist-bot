@@ -9,6 +9,9 @@ import { paths } from '../config.js';
 import { KaistError } from '../errors.js';
 
 export const SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
+/** 학교 메일(Dooray→Gmail 전달) 읽기 전용 (S7, 사용자 결정: 캘린더와 한 토큰) */
+export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const SCOPES = [SCOPE, GMAIL_SCOPE];
 const clientFile = path.join(paths.home, 'google-client.json');
 const tokenFile = path.join(paths.home, 'google-token.json');
 
@@ -52,7 +55,7 @@ export async function googleLogin(onStatus: (m: string) => void): Promise<void> 
   const port = (server.address() as { port: number }).port;
   const redirect = `http://127.0.0.1:${port}`;
   const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
-    client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope: SCOPE,
+    client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope: SCOPES.join(' '), include_granted_scopes: 'true',
     code_challenge: challenge, code_challenge_method: 'S256', state, access_type: 'offline', prompt: 'consent',
   });
 
@@ -75,7 +78,9 @@ export async function googleLogin(onStatus: (m: string) => void): Promise<void> 
 
   const t = await tokenRequest({ code, client_id: client.client_id, client_secret: client.client_secret, redirect_uri: redirect, grant_type: 'authorization_code', code_verifier: verifier });
   if (!t.refresh_token) throw new KaistError('GOOGLE_NO_REFRESH', '구글이 refresh token을 주지 않았습니다. 구글 계정의 앱 권한에서 kaist-cli를 삭제한 뒤 다시 시도해 주세요.');
-  if (!t.scope.split(' ').includes(SCOPE)) throw new KaistError('GOOGLE_SCOPE', `요청한 권한이 승인되지 않았습니다 (승인됨: ${t.scope}).`);
+  const granted = t.scope.split(' ');
+  const missing = SCOPES.filter(x => !granted.includes(x));
+  if (missing.length) throw new KaistError('GOOGLE_SCOPE', `요청한 권한이 일부 승인되지 않았습니다: ${missing.map(x => x.split('/').pop()).join(', ')}. 동의 화면에서 모든 항목을 체크해 주세요.`);
   saveToken({ access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in - 60) * 1000, scope: t.scope });
 }
 
@@ -89,4 +94,10 @@ export async function accessToken(): Promise<string> {
   const next = { ...tok, access_token: t.access_token, expires_at: Date.now() + (t.expires_in - 60) * 1000 };
   saveToken(next);
   return next.access_token;
+}
+
+/** 저장된 토큰에 Gmail 읽기 권한이 있는지 (예전 캘린더 전용 토큰이면 false) */
+export function hasGmailScope(): boolean {
+  const tok = loadToken();
+  return !!tok && tok.scope.split(' ').includes(GMAIL_SCOPE);
 }

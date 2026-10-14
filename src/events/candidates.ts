@@ -57,7 +57,7 @@ export function isPastFile(name: string, semesterYear: number): boolean {
   return years.length > 0 && !years.includes(semesterYear);
 }
 
-interface Source { type: 'notice' | 'section' | 'assignment' | 'file'; id: string; courseId: number; title: string; url: string | null; postedAt: number | null; text: string; pastFile?: boolean }
+interface Source { type: 'notice' | 'section' | 'assignment' | 'file' | 'mail'; id: string; courseId: number | null; title: string; url: string | null; postedAt: number | null; text: string; pastFile?: boolean }
 
 const htmlText = (h: string | null) => (h ?? '').replace(/<(br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, '\n').replace(/<[^>]+>/g, ' ')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'");
@@ -76,6 +76,11 @@ export async function scanCandidates(runId: number, semesterYear: number, onStat
   }
   for (const t of db.prepare(`select t.*, m.url from tasks t join courses c on c.id = t.course_id left join modules m on m.cmid = t.cmid where c.active = 1 and t.intro_html is not null`).all() as Record<string, any>[]) {
     sources.push({ type: 'assignment', id: String(t.cmid), courseId: t.course_id, title: `과제 설명: ${t.name}`, url: t.url, postedAt: null, text: htmlText(t.intro_html) });
+  }
+  // 학교 메일 (S7): 과목에 매핑됐거나 나에게 직접 온 메일만 (학교 전체 메일링의 '시험' 단어는 잡음)
+  for (const m of db.prepare(`select id, subject, body_text, received_at, course_id from mails where (course_id is not null or direct = 1) and body_text is not null`).all() as Record<string, any>[]) {
+    sources.push({ type: 'mail', id: m.id, courseId: m.course_id, title: `메일: ${m.subject}`, url: `https://mail.google.com/mail/u/0/#all/${m.id}`, postedAt: m.received_at, text: `${m.subject}
+${m.body_text}` });
   }
   const { texts, noText } = await fileTexts(onStatus);
   for (const f of texts) {

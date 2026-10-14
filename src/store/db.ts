@@ -55,6 +55,13 @@ create table if not exists files (
 );
 create index if not exists files_course on files(course_id);
 create index if not exists changes_run on changes(run_id);
+-- S7 학교 메일 (Dooray→Gmail 전달, docs/mail-design.md)
+create table if not exists mails (
+  id text primary key, thread_id text, received_at integer not null, from_addr text, from_name text, to_addrs text, cc_addrs text,
+  subject text, snippet text, body_text text, attachments_json text, label_ids text,
+  course_id integer, course_match text, direct integer not null default 0, first_seen_sync_id integer, created_at text not null
+);
+create index if not exists mails_received on mails(received_at);
 -- S6 학사 일정 (docs/school-events-design.md)
 create table if not exists source_text (
   key text primary key, extractor text not null, text text, text_hash text, no_text integer not null default 0,

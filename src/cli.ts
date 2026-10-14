@@ -6,18 +6,19 @@ import { KlmsHttp } from './klms/http.js';
 import { SessionStore } from './klms/session-store.js';
 import { ensureSession, interactiveLogin, probe, resumeSession } from './klms/session.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
-import { getMeta } from './store/db.js';
+import { getMeta, setMeta } from './store/db.js';
 import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
 import { runDoctor } from './sync/doctor.js';
 import { matchCourse, runSync, type SyncResult } from './sync/sync.js';
 import { formatKst, nowSec, parseDuration } from './util/time.js';
 import { ensureCalendar, pushDeadlines } from './cal/push.js';
 import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, parseReminders, updateEvent } from './cal/manual.js';
-import { googleLogin } from './google/oauth.js';
+import { googleLogin, hasGmailScope } from './google/oauth.js';
+import { listMails, showMail, syncMail } from './mail/sync.js';
 import { loadSettings } from './config.js';
 import { writeMarkdown } from './files/markdown.js';
 import { renderPdfs } from './files/pdf.js';
-import { listCandidates, rescanCandidates, setCandidateStatus, type Kind } from './events/candidates.js';
+import { listCandidates, rescanCandidates, scanCandidates, setCandidateStatus, type Kind } from './events/candidates.js';
 import { addSchoolEvent, importManualExams, lastSyncRun, listSchoolEvents, undoAuto, updateSchoolEvent } from './events/register.js';
 
 const program = new Command();
@@ -182,6 +183,7 @@ function syncText(r: SyncResult): string {
     for (const s of [...c.created.map(x => `+ ${x}`), ...c.updated.map(x => `~ ${x}`)].slice(0, 20)) lines.push(`  ${s}`);
     for (const s of c.skippedReview) lines.push(`  ⚠ 마감 확인 필요라 등록 안 함: ${s}`);
   }
+  if (r.mail) lines.push(`메일: 새로 ${r.mail.newMails}통 (나에게 직접 ${r.mail.direct}, 과목 매핑 ${r.mail.courseMatched}) → kaist mail list --academic`);
   if (r.candidates) {
     const c = r.candidates;
     lines.push(`학사 일정 후보: 새로 ${c.newCandidates}건${c.pastSkipped ? ` (지난 학기 자료 ${c.pastSkipped}건 제외)` : ''}${c.newCandidates ? ' → kaist events candidates' : ''}`);
@@ -512,6 +514,74 @@ program.command('summary')
     const pdf = o.pdf ? await renderPdfs(md.filter(f => /_(요약|과목정보)\.md$/.test(f))) : { written: [], failed: [] };
     output(o.json, { markdown: md.length, pdf: pdf.written.length, failed: pdf.failed }, d =>
       `요약을 다시 만들었습니다: md ${d.markdown}개, PDF ${d.pdf}개${d.failed.length ? `, PDF 실패 ${d.failed.length}개` : ''} → ${driveRoot}`);
+  }));
+
+program.command('google')
+  .description('구글 연결')
+  .command('login')
+  .description('구글 승인 (캘린더: 이 앱이 만든 캘린더만 + Gmail 읽기 전용). 7일마다 다시 필요')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { json?: boolean }) => {
+    await googleLogin(status);
+    const id = await ensureCalendar();
+    output(opts.json, { calendarId: id, gmail: hasGmailScope() }, d => `구글을 연결했습니다 (캘린더${d.gmail ? ' + Gmail 읽기' : ''}).`);
+  }));
+
+const mail = program.command('mail').description('학교 메일 (Dooray → Gmail 전달분, 읽기 전용)');
+
+mail.command('sync')
+  .description('Gmail에서 KAIST 메일을 가져와 저장하고 학사 일정 후보를 뽑음 (KLMS 접속 없음)')
+  .option('--since <기간>', '이 기간 전부터 다시 확인 (예: 30d). 기본: 마지막으로 받은 메일 이후')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { since?: string; json?: boolean }) => {
+    requireSynced();
+    const r = await syncMail({ runId: lastSyncRun(), since: o.since ? nowSec() - parseDuration(o.since) : undefined, onStatus: status });
+    const sem = JSON.parse(getMeta('semester')!) as { year: number };
+    const c = await scanCandidates(lastSyncRun() ?? 0, sem.year, status);
+    output(o.json, { ...r, candidates: c }, d => [
+      `메일: 새로 ${d.newMails}통 (${d.from} 이후 KAIST 메일 ${d.fetched}통 확인) — 나에게 직접 ${d.direct}통, 과목 매핑 ${d.courseMatched}통`,
+      `학사 일정 후보: 새로 ${d.candidates.newCandidates}건${d.candidates.newCandidates ? ' → kaist events candidates' : ''}`,
+    ].join('\n'));
+  }));
+
+mail.command('list')
+  .description('저장된 학교 메일 (본문 제외, 최신순)')
+  .option('--since <기간>', '이 기간 안에 받은 것만 (예: 3d)', '7d')
+  .option('--course <과목>', '특정 과목으로 매핑된 메일만')
+  .option('--direct', '나에게 직접 온 메일만')
+  .option('--academic', '과목 매핑됐거나 나에게 직접 온 메일만')
+  .option('--limit <n>', '최대 개수', '50')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { since: string; course?: string; direct?: boolean; academic?: boolean; limit: string; json?: boolean }) => {
+    const list = listMails({ sinceSec: nowSec() - parseDuration(o.since), course: courseIds(o.course), direct: o.direct, academic: o.academic, limit: Number(o.limit) });
+    output(o.json, { lastMailSyncKst: getMeta('mail_last_sync_at') ? formatKst(Math.floor(Date.parse(getMeta('mail_last_sync_at')!) / 1000)) : null, mails: list }, d => [
+      `메일 ${d.mails.length}통 (마지막 메일 확인 ${d.lastMailSyncKst ?? '없음'})`,
+      ...d.mails.map(m => `  ${m.receivedKst} ${m.direct ? '★' : ' '} ${(m.course ?? '').padEnd(13)} ${m.subject}  — ${m.fromName ?? m.from}${m.attachments.length ? ` (첨부 ${m.attachments.length})` : ''}  [${m.id}]`),
+    ].join('\n'));
+  }));
+
+mail.command('show')
+  .description('메일 본문 보기')
+  .argument('<id>', '메일 id (mail list)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (id: string, o: { json?: boolean }) => {
+    const m = showMail(id);
+    if (!m) throw new KaistError('NO_MAIL', `메일 ${id}을(를) 찾지 못했습니다.`);
+    output(o.json, { mail: m }, d => [`${d.mail.subject}`, `보낸 사람: ${d.mail.fromName ?? ''} <${d.mail.from}>  받은 시각: ${d.mail.receivedKst}${d.mail.course ? `  과목: ${d.mail.course}` : ''}`,
+      d.mail.attachments.length ? `첨부: ${d.mail.attachments.join(', ')}` : '', `Gmail: ${d.mail.gmailUrl}`, '', d.mail.body ?? ''].filter(x => x !== '').join('\n'));
+  }));
+
+mail.command('alias')
+  .description('옛 과목 번호 등 별칭을 과목에 연결 (예: kaist mail alias ME361 ME.30061)')
+  .argument('<별칭>').argument('<과목코드>')
+  .option('--json', 'JSON 출력')
+  .action(run(async (alias: string, code: string, o: { json?: boolean }) => {
+    const cache = loadCourses();
+    if (!cache?.courses.some(c => c.code === code)) throw new KaistError('NO_COURSE_MATCH', `이번 학기 과목 코드 "${code}"가 없습니다.`);
+    const m = JSON.parse(getMeta('mail_course_aliases') ?? '{}') as Record<string, string>;
+    m[alias] = code;
+    setMeta('mail_course_aliases', JSON.stringify(m));
+    output(o.json, { aliases: m }, () => `별칭 ${alias} → ${code} 저장. 다음 mail sync부터 새 메일에 적용됩니다.`);
   }));
 
 program.command('doctor')

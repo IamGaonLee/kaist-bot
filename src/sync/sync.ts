@@ -9,7 +9,8 @@ import { renderPdfs } from '../files/pdf.js';
 import { findDropped, handleDropped } from '../files/dropped.js';
 import { scanCandidates, type ScanResult } from '../events/candidates.js';
 import { pushDeadlines, type PushResult } from '../cal/push.js';
-import { hasGoogleToken } from '../google/oauth.js';
+import { hasGmailScope, hasGoogleToken } from '../google/oauth.js';
+import { syncMail, type MailSyncResult } from '../mail/sync.js';
 import { parseAssignPage } from '../klms/adapters/assign-page.js';
 import { parseCoursePage, type ParsedModule } from '../klms/adapters/course-page.js';
 import { parseArticle, parseBoardList } from '../klms/adapters/courseboard.js';
@@ -61,6 +62,7 @@ export interface SyncResult {
   files?: FileStage;
   calendar?: PushResult;
   candidates?: ScanResult;
+  mail?: MailSyncResult;
   startedAt: string;
   finishedAt: string;
   status: 'ok' | 'partial' | 'aborted';
@@ -157,6 +159,11 @@ async function runSyncLocked(opts: SyncOptions): Promise<SyncResult> {
     if (opts.files !== false && okIds.length) result.files = await fileStage(session, semester.label, okIds, runId, opts, result);
 
     // 학사 일정 후보 (S6): 공지·주차 안내·과제 설명·파일 본문에서. 해석·등록은 에이전트가 `kaist events`로
+    // 학교 메일 (S7): 구글 승인에 Gmail 권한이 있으면. 실패해도 KLMS 결과는 유지
+    if (hasGmailScope()) {
+      try { result.mail = await syncMail({ runId, onStatus: log }); }
+      catch (e) { result.warnings.push(`메일 가져오기 실패: ${e instanceof Error ? e.message : String(e)}`); }
+    }
     if (okIds.length) {
       log('학사 일정 후보 찾는 중...');
       try { result.candidates = await scanCandidates(runId, semester.year, log); }

@@ -82,3 +82,17 @@ test('일정 파일 이름 규칙', async () => {
   for (const n of ['Syllabus2026Fall.pdf', 'Syll-2026-MAE341.doc', 'ME30040_Syllabus_260909.pdf', 'Week01_1_Introduction.pdf', '2026-ME30061-HO-01-Introduction.pdf']) assert.ok(SCHEDULE_FILE.test(n), n);
   for (const n of ['Lecture4_Node_Mesh_Method.pdf', 'HW5.pdf', 'matlab-introduction.pdf'.replace('introduction', 'manual')]) assert.ok(!SCHEDULE_FILE.test(n), n);
 });
+
+test('메일 과목 매핑: 코드·이름·별칭, 여러 과목이면 제목 기준', async () => {
+  const { matchCourse } = await import('../src/mail/sync.js');
+  const courses = [
+    { id: 1, code: 'ME.30061', name: '시스템 모델링 및 제어', aliases: ['ME361'] },
+    { id: 2, code: 'MAS.20050(B)', name: '확률및통계', aliases: [] },
+  ];
+  assert.equal(matchCourse('[ME30061] Midterm notice', '', courses)?.id, 1);
+  assert.equal(matchCourse('ME361 HW5', '', courses)?.id, 1);
+  assert.equal(matchCourse('공지', '확률및통계 중간고사 안내', courses)?.id, 2);
+  assert.equal(matchCourse('학과 공지', 'ME.30061과 MAS.20050 모두', courses), null);
+  assert.equal(matchCourse('MAS.20050 시험', 'ME.30061 참고', courses)?.id, 2);
+  assert.equal(matchCourse('ME3006 seminar', '', courses), null);
+});
