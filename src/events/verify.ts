@@ -16,6 +16,8 @@ export interface VerifyInput {
   now: number;
   /** 같은 (과목, 종류, 날짜) 일정이 이미 있는지 */
   existing: boolean;
+  /** 그 날짜의 그 과목 정규 수업 수 (포털 시간표). 시간표가 없으면 undefined (S8b 휴강 시각 규칙) */
+  classCount?: number;
 }
 
 export interface Verdict { ok: boolean; errors: string[]; grade: 'A' | 'B'; needsConfirmReasons: string[] }
@@ -99,5 +101,9 @@ export function verifyEvent(i: VerifyInput): Verdict {
   if (i.kind === 'exam' && !i.start) confirm.push('시험 시각 미상');
   if (i.start && !quoteHasTime(i.quote, i.start)) confirm.push('인용문에 시작 시각이 없음');
   if (i.existing) confirm.push('같은 과목·종류·날짜 일정이 이미 있음 (변경)');
+  // 휴강·온라인: 그날 수업이 정확히 1개여야 수업 시각으로 넣는다. 0개나 2개 이상이면 날짜 해석이 틀렸을 수 있다
+  if ((i.kind === 'no_class' || i.kind === 'online') && !i.start && i.classCount !== undefined && i.classCount !== 1) {
+    confirm.push(i.classCount === 0 ? '그날 시간표에 이 과목 수업이 없음' : '그날 이 과목 수업이 여러 개');
+  }
   return { ok: errors.length === 0, errors, grade: confirm.length === 0 ? 'A' : 'B', needsConfirmReasons: confirm };
 }

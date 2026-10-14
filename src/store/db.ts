@@ -84,6 +84,28 @@ create unique index if not exists school_events_key on school_events(course_id, 
 create table if not exists school_event_history (
   event_id integer not null, changed_at text not null, field text not null, old text, new text, source_id text, by_sync_id integer
 );
+-- S8b 포털 시간표·학사일정, 생활관 (docs/portal-design.md)
+create table if not exists timetable (
+  course_code text not null, weekday integer not null, start text not null, end text not null,
+  subject_name text, building text, room text, fetched_at text not null,
+  primary key (course_code, weekday, start)
+);
+create table if not exists college_plan (
+  schdl_no text not null, title text not null, start_date text not null, end_date text not null,
+  cldr_no text not null, fetched_at text not null, primary key (schdl_no, cldr_no)
+);
+create table if not exists campus_events (
+  id integer primary key autoincrement, source text not null, source_key text not null unique, kind text not null,
+  title text not null, start_date text not null, end_date text not null, gcal_event_id text, status text not null default 'active',
+  created_by_sync_id integer, created_at text not null, updated_at text not null
+);
+create table if not exists campus_event_history (
+  event_id integer not null, changed_at text not null, field text not null, old text, new text, by_sync_id integer
+);
+create table if not exists dorm_info (key text primary key, value text, updated_at text not null);
+create table if not exists dorm_schedule (
+  id text primary key, title text not null, start_date text, end_date text, dorm text, fetched_at text not null
+);
 create index if not exists notices_course on notices(course_id, posted_at);
 create index if not exists tasks_due on tasks(due);
 `;
@@ -114,6 +136,11 @@ function migrate(d: DatabaseSync): void {
   add('tasks', 'page_sig', 'text');
   // 수강 목록에서 빠진 과목을 처리한 시각 (src/files/dropped.ts)
   add('courses', 'dropped_at', 'text');
+  // 일정 시각의 출처: source(원문), timetable(포털 시간표의 정규 수업 시각, S8b)
+  add('school_events', 'time_source', 'text');
+  // college_plan 첫 판은 schdl_no만 키라 달력 38·39(같은 번호)가 서로 덮어썼다. 다시 받으면 되므로 지우고 새로 만든다
+  const pk = (d.prepare('pragma table_info(college_plan)').all() as { name: string; pk: number }[]).filter(c => c.pk > 0).length;
+  if (pk === 1) { d.exec('drop table college_plan'); d.exec(SCHEMA); }
   d.exec(`update files set dl_etag = etag, dl_last_modified = last_modified, dl_length = length where status = 'ok' and dl_length is null`);
   d.exec(`update tasks set page_sig = (select updates_sig from modules where modules.cmid = tasks.cmid) where page_sig is null and page_fetched_at is not null`);
 }

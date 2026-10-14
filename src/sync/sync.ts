@@ -1,5 +1,6 @@
 // kaist sync: 과목 구성, 과제, 공지(S2) + 파일 다운로드와 드라이브 요약(S3). 캘린더 반영은 S4
 import fs from 'node:fs';
+import { syncCampus, type CampusResult } from '../sites/campus.js';
 import path from 'node:path';
 import { loadSettings } from '../config.js';
 import { BlockedError, KaistError, NotAvailableError, SessionExpiredError } from '../errors.js';
@@ -63,6 +64,8 @@ export interface SyncResult {
   calendar?: PushResult;
   candidates?: ScanResult;
   mail?: MailSyncResult;
+  /** 포털 시간표·학사일정, 생활관 (S8b) */
+  campus?: CampusResult;
   startedAt: string;
   finishedAt: string;
   status: 'ok' | 'partial' | 'aborted';
@@ -84,6 +87,10 @@ export interface SyncOptions {
   confirmDownload?: boolean;
   /** false면 구글 캘린더 반영 생략 */
   calendar?: boolean;
+  /** false면 포털·생활관 단계 생략 */
+  portal?: boolean;
+  /** 수강신청 기간에도 포털·생활관에 접속 */
+  forcePortal?: boolean;
   onStatus?: (m: string) => void;
 }
 
@@ -178,6 +185,21 @@ async function runSyncLocked(opts: SyncOptions): Promise<SyncResult> {
         try { result.calendar = await pushDeadlines(new Date().toISOString()); }
         catch (e) { result.warnings.push(`구글 캘린더 반영 실패: ${e instanceof Error ? e.message : String(e)}`); }
       }
+    }
+
+    // 포털 시간표·학사일정, 생활관 (S8b). KLMS 결과와 별개로, 실패·만료는 경고로만
+    if (opts.portal !== false && !opts.course) {
+      try {
+        const c = await syncCampus({ runId, force: opts.forcePortal, calendar: opts.calendar !== false && hasGoogleToken(), onStatus: log });
+        result.campus = c;
+        if (c.skippedReason) result.warnings.push(c.skippedReason);
+        for (const site of ['portal', 'kds'] as const) {
+          const label = site === 'portal' ? '포털' : '생활관';
+          if (c.sites[site] === 'expired') result.warnings.push(`${label} 세션이 만료돼 건너뛰었습니다. \`kaist login\`(폰 승인 1회)으로 다시 로그인하세요.`);
+          if (c.sites[site] === 'no-session') result.warnings.push(`${label}에 로그인한 적이 없어 건너뛰었습니다 (\`kaist login\`).`);
+        }
+        for (const e of c.errors) result.warnings.push(`${e.step} 실패 [${e.code}] ${e.message}`);
+      } catch (e) { result.warnings.push(`포털·생활관 단계 실패: ${e instanceof Error ? e.message : String(e)}`); }
     }
   } catch (e) {
     result.status = 'aborted';

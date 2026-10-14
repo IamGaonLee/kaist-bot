@@ -5,6 +5,7 @@ import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
 import { ensureSession } from './klms/session.js';
 import { loginAll, probeSite, siteStatuses } from './sites/session.js';
+import { activeQuietWindow, dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta, setMeta } from './store/db.js';
 import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
@@ -112,6 +113,60 @@ program.command('status')
     ].join('\n'));
   }));
 
+program.command('timetable')
+  .description('이번 학기 시간표 (포털, 로컬 데이터. sync가 갱신)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { json?: boolean }) => {
+    const t = listTimetable();
+    output(opts.json, { ...t, fetchedMinutesAgo: t.fetchedAt ? minutesSince(t.fetchedAt) : null }, d => d.slots.length === 0
+      ? '시간표가 아직 없습니다. `kaist login` 뒤 `kaist sync`로 받습니다.'
+      : [`시간표 (포털, ${fmtTime(d.fetchedAt!)} 받음)`, ...d.slots.map(s => `  ${s.day} ${s.start}~${s.end} ${s.courseName} (${s.course}) ${s.building} ${s.room}`)].join('\n'));
+  }));
+
+const school = program.command('school').description('학사일정 (포털 공식)');
+
+school.command('list', { isDefault: true })
+  .description('학사일정 (로컬 데이터). 기본은 주요 일정만, 오늘 이후')
+  .option('--all', '주요 일정이 아닌 것도 (학사과정 달력 전체)')
+  .option('--from <날짜>', 'YYYY-MM-DD부터')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { all?: boolean; from?: string; json?: boolean }) => {
+    const from = opts.from ?? todayKst();
+    const fetchedAt = getMeta('college_plan_fetched_at');
+    const data = { fetchedAt, items: listCollegePlan({ from, major: !opts.all }), calendar: listCampusEvents({ from }), quietWindow: fetchedAt ? activeQuietWindow() : null };
+    output(opts.json, data, d => d.items.length === 0 && !d.fetchedAt
+      ? '학사일정이 아직 없습니다. `kaist login` 뒤 `kaist sync`로 받습니다.'
+      : [`학사일정 (포털, ${d.fetchedAt ? fmtTime(d.fetchedAt) : '-'} 받음)${opts.all ? '' : ' — 주요 일정'}`,
+        ...d.items.map(p => `  ${p.startDate}${p.endDate !== p.startDate ? `~${p.endDate}` : ''} ${p.title}${opts.all && p.major ? ' ★' : ''}`),
+        ...(d.quietWindow ? [`지금은 수강신청 기간입니다 (${d.quietWindow.title}): sync가 포털·생활관에 접속하지 않습니다.`] : [])].join('\n'));
+  }));
+
+school.command('undo')
+  .description('자동 등록한 학사·생활관 일정 되돌리기 (--yes 없으면 대상만 보여줌). 되돌린 일정은 다시 넣지 않음')
+  .option('--sync <id>', '특정 sync 회차 (기본은 가장 최근)')
+  .option('--yes', '확인했으니 캘린더에서 삭제')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { sync?: string; yes?: boolean; json?: boolean }) => {
+    const r = await undoCampus(o.sync ? Number(o.sync) : 'last', !!o.yes);
+    if (!r.deleted && r.targets.length) process.exitCode = 4;
+    output(o.json, r, d => d.targets.length === 0 ? '되돌릴 자동 등록 일정이 없습니다.'
+      : [`${d.deleted ? '되돌렸습니다' : '되돌릴 대상 (실행하려면 --yes)'}: sync ${d.syncId}, ${d.targets.length}건`,
+        ...d.targets.map(t => `  ${t.startDate} [${t.kind === 'school' ? '학사' : '생활관'}] ${t.title}`)].join('\n'));
+  }));
+
+program.command('dorm')
+  .description('생활관 배정 정보·일정 (kds, 로컬 데이터. 드라이브에 올리지 않음)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { json?: boolean }) => {
+    const d0 = dormSummary();
+    output(opts.json, d0, d => !d.fetchedAt
+      ? '생활관 정보가 아직 없습니다. `kaist login` 뒤 `kaist sync`로 받습니다.'
+      : [`생활관 (${fmtTime(d.fetchedAt)} 받음)`,
+        `  학기 ${d.info.semester ?? '-'}, 생활관 ${d.info.dorm ?? '-'}`,
+        `  입사 ${d.info.moveIn ?? '-'}, 퇴사 ${d.info.moveOut ?? '-'}, 거주기간 만료 ${d.info.residenceEnd ?? '-'}`,
+        ...(d.schedule as { title: string; startDate: string | null }[]).map(s => `  일정 ${s.startDate ?? '-'} ${s.title}`)].join('\n'));
+  }));
+
 program.command('courses')
   .description('이번 학기 수강 과목 (기본은 로컬 데이터)')
   .option('--refresh', 'KLMS에서 다시 가져오기')
@@ -204,6 +259,16 @@ function syncText(r: SyncResult): string {
     const c = r.candidates;
     lines.push(`학사 일정 후보: 새로 ${c.newCandidates}건${c.pastSkipped ? ` (지난 학기 자료 ${c.pastSkipped}건 제외)` : ''}${c.newCandidates ? ' → kaist events candidates' : ''}`);
   }
+  if (r.campus && r.campus.status !== 'skipped') {
+    const c = r.campus;
+    const parts = [c.timetable ? `시간표 ${c.timetable.slots}칸` : '', c.plan ? `학사일정 ${c.plan.items}건(주요 ${c.plan.major})` : '', c.dorm ? `생활관 정보${c.dorm.changed ? ' 변경됨' : ''}` : ''].filter(Boolean);
+    lines.push(`포털·생활관: ${parts.join(', ') || '받은 것 없음'} (요청 ${c.requests}건)`);
+    const cal = c.calendar;
+    if (cal.created.length + cal.updated.length + cal.removed.length) {
+      lines.push(`  학사·생활관 일정: 새로 ${cal.created.length}, 수정 ${cal.updated.length}, 사라짐 ${cal.removed.length}`);
+      for (const s of [...cal.created.map(x => `+ ${x}`), ...cal.updated.map(x => `~ ${x}`), ...cal.removed.map(x => `- ${x}`)].slice(0, 20)) lines.push(`    ${s}`);
+    }
+  }
   if (Object.keys(r.unprocessed).length) lines.push(`처리하지 못한 활동 유형: ${Object.entries(r.unprocessed).map(([k, v]) => `${k} ${v}개`).join(', ')}`);
   for (const w of r.warnings) lines.push(`경고: ${w}`);
   return lines.join('\n');
@@ -216,9 +281,11 @@ program.command('sync')
   .option('--confirm-download', '첫 전체 다운로드 승인 (한 번만)')
   .option('--no-calendar', '구글 캘린더 반영 생략')
   .option('--no-login', '세션이 만료됐으면 로그인 창을 띄우지 않고 실패')
+  .option('--no-portal', '포털 시간표·학사일정, 생활관 단계 생략')
+  .option('--force-portal', '수강신청·변경 기간에도 포털·생활관에 접속')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; calendar: boolean; login: boolean; json?: boolean }) => {
-    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, calendar: opts.calendar, onStatus: status });
+  .action(run(async (opts: { course?: string; files: boolean; confirmDownload?: boolean; calendar: boolean; login: boolean; portal: boolean; forcePortal?: boolean; json?: boolean }) => {
+    const r = await runSync({ course: opts.course, interactive: opts.login, files: opts.files, confirmDownload: opts.confirmDownload, calendar: opts.calendar, portal: opts.portal, forcePortal: opts.forcePortal, onStatus: status });
     if (opts.json) console.log(JSON.stringify({ ok: r.status === 'ok', ...r }, null, 2));
     else console.log(syncText(r));
     if (r.status === 'aborted') process.exitCode = r.abortReason?.code === 'SESSION_EXPIRED' ? 2 : 1;

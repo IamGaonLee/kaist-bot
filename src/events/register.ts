@@ -6,6 +6,7 @@ import { getMeta, openDb, tx } from '../store/db.js';
 import { formatKst, nowSec, parseDashKst } from '../util/time.js';
 import { setCandidateStatus, type Kind } from './candidates.js';
 import { dayInfo, verifyEvent, type Verdict } from './verify.js';
+import { classesOn } from '../sites/campus.js';
 
 export class NeedsConfirmationError extends KaistError {
   constructor(public readonly verdict: Verdict) {
@@ -22,7 +23,7 @@ const allDayRemind = (mins: number[]) => mins.map(m => m - 9 * 60);
 export interface SchoolEventRow {
   id: number; course_id: number; kind: Kind; title: string; date: string; start_at: number | null; end_at: number | null; all_day: number; time_known: number;
   location: string | null; source_type: string; source_id: string | null; source_url: string | null; quote: string | null; confidence: string;
-  created_by_sync_id: number | null; gcal_event_id: string | null; status: string;
+  created_by_sync_id: number | null; gcal_event_id: string | null; status: string; time_source?: string | null;
 }
 
 function semesterRange(): { start: number; end: number } {
@@ -54,6 +55,7 @@ function toGEvent(e: SchoolEventRow, courseName: string, label: string | undefin
     `※ 수집한 글에서 해석한 일정 (${e.confidence === 'auto' ? '자동 등록' : '확인 후 등록'}). 원문과 다르면 KLMS를 따르세요.`,
     e.source_type === 'file' ? '※ 학기 초 강의계획서 기준이라 바뀌었을 수 있습니다.' : '',
     e.quote ? `원문: "${e.quote}"` : '',
+    e.time_source === 'timetable' ? '시각: 시간표 기준 (원문에 시각 없음, 그날 정규 수업 시각)' : '',
     `출처: ${e.source_type === 'manual' ? '직접 입력' : e.source_type}${e.source_url ? ` — ${e.source_url}` : ''}`,
     ...prev,
     `기록: ${formatKst(nowSec())} (KST)`,
@@ -77,7 +79,7 @@ export interface AddOptions {
   fromCandidate?: number; quote?: string; manual?: boolean; confirmed?: boolean; dryRun?: boolean;
 }
 
-export interface AddResult { verdict: Verdict; event: SchoolEventRow | null; confidence: 'auto' | 'confirmed' | null; dryRun: boolean }
+export interface AddResult { verdict: Verdict; event: SchoolEventRow | null; confidence: 'auto' | 'confirmed' | null; dryRun: boolean; timeFromTimetable?: string | null }
 
 export async function addSchoolEvent(o: AddOptions): Promise<AddResult> {
   const db = openDb();
@@ -95,13 +97,17 @@ export async function addSchoolEvent(o: AddOptions): Promise<AddResult> {
     context = c.context; sourceType = c.source_type; sourceId = c.source_id; sourceUrl = c.source_url;
   }
   const existing = db.prepare('select id from school_events where course_id = ? and kind = ? and date = ?').get(course.id, o.kind, o.date) as { id: number } | undefined;
+  // 휴강·온라인에 시각이 없으면 포털 시간표의 그날 수업 시각을 쓴다 (정확히 1개일 때만, 설계 portal-design 3절)
+  const classes = (o.kind === 'no_class' || o.kind === 'online') && !o.start && /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? classesOn(course.code, o.date) : null;
   const verdict = verifyEvent({
     kind: o.kind, date: o.date, start: o.start, end: o.end, quote: o.quote ?? '', context, sourceType: sourceType as never,
-    semester: semesterRange(), now: nowSec(), existing: !!existing,
+    semester: semesterRange(), now: nowSec(), existing: !!existing, classCount: classes?.length,
   });
+  const fromTimetable = classes?.length === 1 ? classes[0]! : null;
+  if (fromTimetable) { o = { ...o, start: fromTimetable.start, end: fromTimetable.end, location: o.location ?? `${fromTimetable.building} ${fromTimetable.room}`.trim() }; }
   if (!verdict.ok) throw new KaistError('VERIFY_FAILED', `등록 전 검사 실패: ${verdict.errors.join(' / ')}`, { errors: verdict.errors });
   if (existing) throw new KaistError('EVENT_EXISTS', `같은 과목·종류·날짜 일정이 이미 있습니다 (id ${existing.id}). 바꾸려면 \`kaist events update ${existing.id}\`를 쓰세요.`);
-  if (o.dryRun) return { verdict, event: null, confidence: null, dryRun: true };
+  if (o.dryRun) return { verdict, event: null, confidence: null, dryRun: true, timeFromTimetable: fromTimetable ? `${fromTimetable.start}~${fromTimetable.end}` : null };
   if (verdict.grade === 'B' && !o.confirmed) throw new NeedsConfirmationError(verdict);
 
   const confidence = verdict.grade === 'A' && !o.confirmed ? 'auto' : 'confirmed';
@@ -109,9 +115,9 @@ export async function addSchoolEvent(o: AddOptions): Promise<AddResult> {
   const endAt = o.end ? parseDashKst(`${o.date} ${o.end.padStart(5, '0')}`) : null;
   const now = new Date().toISOString();
   const id = Number(db.prepare(`insert into school_events(course_id, kind, title, date, start_at, end_at, all_day, time_known, location, source_type, source_id, source_url, quote,
-      confidence, created_by_sync_id, status, created_at, updated_at) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`)
+      confidence, created_by_sync_id, status, created_at, updated_at, time_source) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`)
     .run(course.id, o.kind, o.label ?? KIND_LABEL[o.kind], o.date, startAt, endAt, startAt ? 0 : 1, startAt ? 1 : 0, o.location ?? null, sourceType, sourceId, sourceUrl,
-      o.quote ?? null, confidence, lastRunId(), now, now).lastInsertRowid);
+      o.quote ?? null, confidence, lastRunId(), now, now, fromTimetable ? 'timetable' : startAt ? 'source' : null).lastInsertRowid);
   const row = db.prepare('select * from school_events where id = ?').get(id) as unknown as SchoolEventRow;
   try {
     const calId = await ensureCalendar();
