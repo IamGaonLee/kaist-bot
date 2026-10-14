@@ -132,6 +132,12 @@ export async function addSchoolEvent(o: AddOptions): Promise<AddResult> {
   return { verdict, event: row, confidence, dryRun: false };
 }
 
+/** 종일↔시각 일정 전환 시 PATCH가 이전 칸을 남기지 않도록 */
+export function replaceTimes(ev: GEvent): GEvent {
+  const fix = (t: GEvent['start']) => (t.dateTime ? { ...t, date: null } : { ...t, dateTime: null, timeZone: null }) as unknown as GEvent['start'];
+  return { ...ev, start: fix(ev.start), end: fix(ev.end) };
+}
+
 export interface UpdateOptions { date?: string; start?: string; end?: string; location?: string; label?: string; cancel?: boolean; fromCandidate?: number; quote?: string; confirmed?: boolean }
 
 /** 변경·취소는 항상 확인 필요(B). 이력을 남기고 일정을 제자리에서 수정한다 */
@@ -141,28 +147,33 @@ export async function updateSchoolEvent(id: number, o: UpdateOptions): Promise<S
   if (!e) throw new KaistError('NO_EVENT', `학사 일정 ${id}을(를) 찾지 못했습니다.`);
   if (!o.confirmed) throw new KaistError('NEEDS_CONFIRMATION', '일정 변경·취소는 사용자 확인이 필요합니다. 확인받은 뒤 --confirmed를 붙여 다시 실행하세요.');
   const course = db.prepare('select name from courses where id = ?').get(e.course_id) as { name: string };
+  let src: { source_type: string; source_id: string | null; source_url: string | null } | null = null;
   if (o.fromCandidate) {
-    const c = db.prepare('select context from event_candidates where id = ?').get(o.fromCandidate) as { context: string } | undefined;
+    const c = db.prepare('select context, source_type, source_id, source_url from event_candidates where id = ?').get(o.fromCandidate) as { context: string; source_type: string; source_id: string | null; source_url: string | null } | undefined;
     if (!c) throw new KaistError('NO_CANDIDATE', `후보 ${o.fromCandidate}을(를) 찾지 못했습니다.`);
     if (o.quote && !c.context.replace(/\s+/g, ' ').toLowerCase().includes(o.quote.replace(/\s+/g, ' ').toLowerCase())) throw new KaistError('VERIFY_FAILED', '인용문이 후보 원문에 없습니다.');
+    // 새 근거 글로 출처를 바꾼다 (계획서 기준 → 공지 등)
+    src = { source_type: c.source_type, source_id: c.source_id, source_url: c.source_url };
   }
   const date = o.date ?? e.date;
   if (!dayInfo(date)) throw new KaistError('BAD_TIME', `날짜 형식이 잘못됐습니다: ${date}`);
   const startAt = o.start ? parseDashKst(`${date} ${o.start.padStart(5, '0')}`) : (o.date && e.start_at !== null ? parseDashKst(`${date} ${formatKst(e.start_at).slice(11)}`) : e.start_at);
   const endAt = o.end ? parseDashKst(`${date} ${o.end.padStart(5, '0')}`) : (o.date && e.end_at !== null ? parseDashKst(`${date} ${formatKst(e.end_at).slice(11)}`) : e.end_at);
   const next: SchoolEventRow = { ...e, date, start_at: startAt, end_at: endAt, all_day: startAt ? 0 : 1, time_known: startAt ? 1 : 0, location: o.location ?? e.location,
-    status: o.cancel ? 'cancelled' : e.status, confidence: 'confirmed', quote: o.quote ?? e.quote };
+    status: o.cancel ? 'cancelled' : e.status, confidence: 'confirmed', quote: o.quote ?? e.quote, ...(src ?? {}) };
   const fields: [string, unknown, unknown][] = [['date', e.date, next.date], ['start_at', e.start_at, next.start_at], ['end_at', e.end_at, next.end_at], ['location', e.location, next.location], ['status', e.status, next.status]];
+  if (src && src.source_type !== e.source_type) fields.push(['source_type', e.source_type, src.source_type]);
   const changed = fields.filter(([, a, b]) => a !== b);
   if (changed.length === 0 && !o.label) throw new KaistError('NO_CHANGE', '바뀐 내용이 없습니다.');
-  const prevLines = changed.map(([f, a]) => `이전 ${f === 'start_at' || f === 'end_at' ? (f === 'start_at' ? '시작' : '끝') : f === 'date' ? '날짜' : f === 'location' ? '장소' : '상태'}: ${typeof a === 'number' ? formatKst(a) : a ?? '-'}`);
+  const prevLines = changed.map(([f, a]) => `이전 ${f === 'start_at' || f === 'end_at' ? (f === 'start_at' ? '시작' : '끝') : f === 'date' ? '날짜' : f === 'location' ? '장소' : f === 'source_type' ? '출처' : '상태'}: ${typeof a === 'number' ? formatKst(a) : a ?? '-'}`);
+  // 캘린더를 먼저 고친다 (실패하면 로컬도 그대로). PATCH는 start/end 안을 합치므로 안 쓰는 칸(date↔dateTime)을 null로 지운다
+  if (e.gcal_event_id) await gcal.patchEvent(await ensureCalendar(), e.gcal_event_id, replaceTimes(toGEvent(next, course.name, o.label ?? e.title, prevLines)));
   tx(() => {
-    db.prepare(`update school_events set date=?, start_at=?, end_at=?, all_day=?, time_known=?, location=?, status=?, confidence='confirmed', quote=?, title=coalesce(?, title), updated_at=? where id=?`)
-      .run(next.date, next.start_at, next.end_at, next.all_day, next.time_known, next.location, next.status, next.quote, o.label ?? null, new Date().toISOString(), id);
+    db.prepare(`update school_events set date=?, start_at=?, end_at=?, all_day=?, time_known=?, location=?, status=?, confidence='confirmed', quote=?, title=coalesce(?, title), source_type=?, source_id=?, source_url=?, updated_at=? where id=?`)
+      .run(next.date, next.start_at, next.end_at, next.all_day, next.time_known, next.location, next.status, next.quote, o.label ?? null, next.source_type, next.source_id, next.source_url, new Date().toISOString(), id);
     const h = db.prepare('insert into school_event_history(event_id, changed_at, field, old, new, source_id, by_sync_id) values(?, ?, ?, ?, ?, ?, ?)');
     for (const [f, a, b] of changed) h.run(id, new Date().toISOString(), f, a === null ? null : String(a), b === null ? null : String(b), o.fromCandidate ? String(o.fromCandidate) : null, lastRunId());
   });
-  if (e.gcal_event_id) await gcal.patchEvent(await ensureCalendar(), e.gcal_event_id, toGEvent(next, course.name, o.label ?? e.title, prevLines));
   if (o.fromCandidate) setCandidateStatus(o.fromCandidate, 'linked', null, id);
   return db.prepare('select * from school_events where id = ?').get(id) as unknown as SchoolEventRow;
 }

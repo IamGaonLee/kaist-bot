@@ -169,3 +169,13 @@ test('휴강 시각 규칙: 그날 수업이 1개가 아니면 B등급', () => {
   assert.deepEqual(verifyEvent({ ...base, classCount: 2 }).needsConfirmReasons, ['그날 이 과목 수업이 여러 개']);
   assert.equal(verifyEvent({ ...base, kind: 'exam', classCount: 0, start: '10:30', quote: '10/27(화) 10:30 시험', context: '10/27(화) 10:30 시험' }).needsConfirmReasons.includes('그날 시간표에 이 과목 수업이 없음'), false, '시험에는 적용 안 함');
 });
+
+import { replaceTimes } from '../src/events/register.js';
+
+test('일정 수정: 종일↔시각 전환 시 이전 칸을 null로 지운다 (구글 PATCH는 start 안을 합침)', () => {
+  const timed = replaceTimes({ summary: 's', start: { dateTime: '2026-10-19T04:00:00.000Z', timeZone: 'Asia/Seoul' }, end: { dateTime: '2026-10-19T06:45:00.000Z', timeZone: 'Asia/Seoul' } });
+  assert.equal((timed.start as Record<string, unknown>).date, null);
+  const allDay = replaceTimes({ summary: 's', start: { date: '2026-10-19' }, end: { date: '2026-10-20' } });
+  assert.equal((allDay.start as Record<string, unknown>).dateTime, null);
+  assert.equal(allDay.start.date, '2026-10-19');
+});
