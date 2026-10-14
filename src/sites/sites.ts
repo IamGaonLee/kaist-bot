@@ -62,6 +62,18 @@ export const SITE_DEFS: Record<PortalSite, SiteDef> = {
   },
 };
 
+/**
+ * 포털 공지 게시판 (사용자 결정 3). body=false는 제목만 저장한다.
+ * - filter: `board/recents?boardNos=<번호>`로 게시판만 받는다 (번호 여러 개를 한 번에 넣으면 0건이라 따로 요청)
+ * - stream: 일정형 게시판(세미나)은 boardNos 필터가 0건이라, 필터 없는 통합 목록을 시간순으로 읽으며 골라낸다
+ */
+export const PORTAL_BOARDS = [
+  { no: 31, name: '수강/학적/논문', body: true, via: 'filter' },
+  { no: 28, name: '장학/복지', body: true, via: 'filter' },
+  { no: 45, name: '생활관', body: true, via: 'filter' },
+  { no: 23, name: '세미나/행사공지', body: false, via: 'stream' },
+] as const;
+
 /** 허용 목록에 넣으면 안 되는 동사 (단위 테스트로 확인) */
 export const MUTATING_VERB = /aply|cancel|cancl|modify|save|delete|insert|update|regist|drop|submit|apply/i;
 

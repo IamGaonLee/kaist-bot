@@ -6,6 +6,7 @@ import { SITES, type SiteId } from './klms/session-store.js';
 import { ensureSession } from './klms/session.js';
 import { loginAll, probeSite, siteStatuses } from './sites/session.js';
 import { dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
+import { listPortalNotices } from './sites/notices.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta, setMeta } from './store/db.js';
 import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
@@ -224,11 +225,11 @@ function syncText(r: SyncResult): string {
     const n = (kind: string) => r.changes.filter(c => c.courseId === id && c.change === 'new' && c.kind === kind).length;
     lines.push(`  첫 수집 ${code.get(id)}: 활동 ${n('module')}개, 과제·퀴즈 ${n('task')}개, 게시판 글 ${n('notice')}개 등록`);
   }
-  const interesting = r.changes.filter(c => !(first.has(c.courseId) && c.change === 'new') && (c.kind !== 'module' || c.change !== 'changed'));
+  const interesting = r.changes.filter(c => !(c.courseId !== null && first.has(c.courseId) && c.change === 'new') && (c.kind !== 'module' || c.change !== 'changed'));
   if (interesting.length) {
     lines.push(`변경 ${interesting.length}건:`);
     const shown = interesting.slice(0, 60);
-    for (const c of shown) lines.push(`  [${CHANGE_LABEL[c.change]}] ${c.kind === 'course' ? '' : (code.get(c.courseId) ?? c.courseId) + ' '}${c.kind === 'notice' ? '글' : c.kind === 'task' ? '과제' : c.kind === 'course' ? '과목' : c.detail ?? '활동'}: ${c.title}${c.detail && c.kind === 'task' && c.change !== 'new' ? ` (${c.detail})` : ''}`);
+    for (const c of shown) lines.push(`  [${CHANGE_LABEL[c.change]}] ${c.kind === 'course' || c.courseId === null ? '' : (code.get(c.courseId) ?? c.courseId) + ' '}${c.kind === 'portal_notice' ? '학교 공지' : c.kind === 'notice' ? '글' : c.kind === 'task' ? '과제' : c.kind === 'course' ? '과목' : c.detail ?? '활동'}: ${c.title}${c.detail && c.kind === 'task' && c.change !== 'new' ? ` (${c.detail})` : ''}`);
     if (interesting.length > shown.length) lines.push(`  … 외 ${interesting.length - shown.length}건 (--json으로 전체 확인)`);
   } else lines.push('변경 없음');
   if (r.files) {
@@ -262,6 +263,10 @@ function syncText(r: SyncResult): string {
     const c = r.campus;
     const parts = [c.timetable ? `시간표 ${c.timetable.slots}칸` : '', c.plan ? `학사일정 ${c.plan.items}건(주요 ${c.plan.major})` : '', c.dorm ? `생활관 정보${c.dorm.changed ? ' 변경됨' : ''}` : ''].filter(Boolean);
     lines.push(`포털·생활관: ${parts.join(', ') || '받은 것 없음'} (요청 ${c.requests}건)`);
+    if (c.notices) {
+      const n = c.notices;
+      lines.push(`  학교 공지: ${n.boards.map(b => `${b.name} 새 ${b.fresh}${b.changed ? `·수정 ${b.changed}` : ''}`).join(', ')} (목록 ${n.boards.reduce((a, b) => a + b.pages, 0)}쪽, 본문 ${n.bodies}건)`);
+    }
     const cal = c.calendar;
     if (cal.created.length + cal.updated.length + cal.removed.length) {
       lines.push(`  학사·생활관 일정: 새로 ${cal.created.length}, 수정 ${cal.updated.length}, 사라짐 ${cal.removed.length}`);
@@ -308,16 +313,30 @@ program.command('assignments')
   }));
 
 program.command('notices')
-  .description('공지/게시판 글 (로컬 데이터)')
+  .description('공지/게시판 글 (로컬 데이터). --source portal은 포털 학사 공지')
+  .option('--source <출처>', 'klms | portal', 'klms')
+  .option('--board <게시판>', '포털 게시판 번호나 이름 일부 (--source portal)')
   .option('--since <기간>', '이 기간 안에 올라온 글만 (예: 3d)')
   .option('--course <과목>', '특정 과목만')
   .option('--kind <종류>', 'notice | qna | board | all', 'all')
   .option('--body', '본문 텍스트 포함')
   .option('--limit <n>', '최대 개수', '50')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { since?: string; course?: string; kind: string; body?: boolean; limit: string; json?: boolean }) => {
+  .action(run(async (opts: { source: string; board?: string; since?: string; course?: string; kind: string; body?: boolean; limit: string; json?: boolean }) => {
     requireSynced();
-    const notices = listNotices({ sinceSec: opts.since ? nowSec() - parseDuration(opts.since) : undefined, course: courseIds(opts.course), kind: opts.kind, body: opts.body, limit: Number(opts.limit) });
+    const sinceSec = opts.since ? nowSec() - parseDuration(opts.since) : undefined;
+    if (opts.source === 'portal') {
+      const fetchedAt = getMeta('portal_notices_fetched_at');
+      const notices = listPortalNotices({ sinceSec, board: opts.board, body: opts.body, limit: Number(opts.limit) });
+      output(opts.json, { ...syncInfo(), source: 'portal', fetchedAt, notices }, d => [
+        `포털 학교 공지 ${d.notices.length}개 (${d.fetchedAt ? fmtTime(d.fetchedAt) : '-'} 받음)`,
+        ...d.notices.map(n => `  ${n.postedKst}${n.pinned ? ' 📌' : ''} [${n.board}] ${n.title}${n.dept ? ` — ${n.dept}` : ''}${n.attachmentCount ? ` (첨부 ${n.attachments.map(a => a.name).join(', ') || n.attachmentCount})` : ''}` +
+          (n.bodyText ? `\n${n.bodyText.split('\n').map(l => '      ' + l).join('\n')}` : '')),
+      ].join('\n'));
+      return;
+    }
+    if (opts.source !== 'klms') throw new KaistError('BAD_ARGS', `--source는 klms 또는 portal입니다 (${opts.source}).`);
+    const notices = listNotices({ sinceSec, course: courseIds(opts.course), kind: opts.kind, body: opts.body, limit: Number(opts.limit) });
     output(opts.json, { ...syncInfo(), notices }, d => [
       `글 ${d.notices.length}개 (마지막 수집 ${fmtTime(d.lastSync!)})`,
       ...d.notices.map(n => `  ${n.postedKst ?? '-'}  ${n.course.padEnd(13)} [${n.board}] ${n.title}${n.attachments.length ? ` (첨부 ${n.attachments.length})` : ''}` +
@@ -600,7 +619,7 @@ program.command('summary')
 program.command('google')
   .description('구글 연결')
   .command('login')
-  .description('구글 승인 (캘린더: 이 앱이 만든 캘린더만 + Gmail 읽기 전용). 7일마다 다시 필요')
+  .description('구글 승인 (캘린더: 이 앱이 만든 캘린더만 + Gmail 읽기 전용)')
   .option('--json', 'JSON 출력')
   .action(run(async (opts: { json?: boolean }) => {
     await googleLogin(status);

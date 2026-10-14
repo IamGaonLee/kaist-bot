@@ -9,6 +9,7 @@ import { formatKst, nowSec } from '../util/time.js';
 import { courseDir, semesterDir } from './layout.js';
 import { taskFolder } from './download.js';
 import { stripQuoted } from '../events/candidates.js';
+import { PORTAL_BOARDS } from '../sites/sites.js';
 
 /** 자동 알림 발신자 (드라이브 _학교메일에서 제외, 사용자 결정) */
 const AUTOMATED = /no-?reply|notification|mailer-daemon|github\.com|donotreply|ubl_main/i;
@@ -50,6 +51,31 @@ function write(file: string, content: string): void {
   const tmp = file + '.kaist-part';
   fs.writeFileSync(tmp, content.endsWith('\n') ? content : content + '\n');
   fs.renameSync(tmp, file);
+}
+
+/**
+ * 포털 학사 공지 제목 목록 → <학기>/_학교공지.md (S8c, 사용자 결정: 드라이브에는 제목만).
+ * 받은 글이 없으면 쓰지 않는다. 쓴 파일 경로 또는 null
+ */
+export function writeSchoolNotices(root: string, semesterLabel: string, lastSync: string): string | null {
+  const db = openDb();
+  if ((db.prepare('select count(*) n from portal_notices').get() as { n: number }).n === 0) return null;
+  const since = nowSec() - 30 * 86400;
+  const rows = db.prepare('select board_no, board_name, title, dept, reg_at, pinned, atch_count from portal_notices where reg_at >= ? or pinned = 1 order by reg_at desc').all(since) as Record<string, any>[];
+  const L = [`# ${semesterLabel} 학교 공지 (포털)`, '', stamp(lastSync), '',
+    '> KAIST 포털 공지 중 수강/학적·장학/복지·생활관·세미나 게시판의 최근 30일 제목입니다. 본문은 PC에서 `kaist notices --source portal --body`로 봅니다.', ''];
+  const boards = [...new Map(rows.map(r => [r.board_no as number, r.board_name as string])).entries()];
+  if (boards.length === 0) L.push('최근 30일 글 없음');
+  for (const [no, name] of boards) {
+    L.push(`## ${name}`, '');
+    for (const r of rows.filter(x => x.board_no === no)) {
+      L.push(`- ${formatKst(r.reg_at)}${r.pinned ? ' 📌' : ''} ${r.title}${r.dept ? ` — ${r.dept}` : ''}${r.atch_count ? ` (첨부 ${r.atch_count})` : ''}`);
+    }
+    L.push('');
+  }
+  const file = path.join(semesterDir(root, semesterLabel), '_학교공지.md');
+  write(file, L.join('\n'));
+  return file;
 }
 
 interface TaskRow { cmid: number; course_id: number; modname: string; name: string; due: number | null; due_source: string | null; needs_review: number; review_reason: string | null;
@@ -210,6 +236,18 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
     if (recent.length === 0) S.push('없음');
     for (const m of recent) S.push(`- ${formatKst(m.received_at)} ${m.from_name ?? m.from_addr ?? ''}: ${m.subject ?? ''}`);
     S.push('', `→ 전체: [_학교메일](${encodeURIComponent('_학교메일.md')})`, '');
+  }
+  // 포털 학사 공지 (S8c): 요약에는 세미나를 뺀 최근 7일 제목만
+  const school = writeSchoolNotices(root, semesterLabel, lastSync);
+  if (school) {
+    written.push(school);
+    const recentPortal = db.prepare('select board_name, title, reg_at from portal_notices where reg_at >= ? order by reg_at desc').all(now - 7 * 86400) as Record<string, any>[];
+    const titleOnly = new Set(PORTAL_BOARDS.filter(b => !b.body).map(b => b.name as string));
+    const recentMain = recentPortal.filter(r => !titleOnly.has(r.board_name));
+    S.push('## 최근 7일 학교 공지 (수강/학적·장학/복지·생활관)', '');
+    if (recentMain.length === 0) S.push('없음');
+    for (const r of recentMain) S.push(`- ${formatKst(r.reg_at)} [${r.board_name}] ${r.title}`);
+    S.push('', `→ 전체: [_학교공지](${encodeURIComponent('_학교공지.md')})`, '');
   }
   S.push('', '## 과목', '');
   const courses = db.prepare('select * from courses where active = 1 order by code').all() as { id: number; code: string; name: string }[];

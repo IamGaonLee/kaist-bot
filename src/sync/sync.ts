@@ -5,7 +5,7 @@ import path from 'node:path';
 import { loadSettings } from '../config.js';
 import { BlockedError, KaistError, NotAvailableError, SessionExpiredError } from '../errors.js';
 import { collectCandidates, executeDownloads, planFiles, recordPlan } from '../files/download.js';
-import { writeMarkdown } from '../files/markdown.js';
+import { writeMarkdown, writeSchoolNotices } from '../files/markdown.js';
 import { renderPdfs } from '../files/pdf.js';
 import { findDropped, handleDropped } from '../files/dropped.js';
 import { scanCandidates, type ScanResult } from '../events/candidates.js';
@@ -29,8 +29,9 @@ import { checkCoursePage, HANDLED, InvariantError } from './invariants.js';
 const MAX_BOARD_PAGES = 30;
 
 export interface Change {
-  courseId: number;
-  kind: 'module' | 'task' | 'notice' | 'course';
+  /** 포털 공지 등 과목과 무관한 변경은 null */
+  courseId: number | null;
+  kind: 'module' | 'task' | 'notice' | 'course' | 'portal_notice';
   ref: number;
   change: 'new' | 'changed' | 'removed' | 'due_changed' | 'status_changed' | 'needs_review';
   title: string;
@@ -196,6 +197,16 @@ async function runSyncLocked(opts: SyncOptions): Promise<SyncResult> {
           if (c.sites[site] === 'no-session') result.warnings.push(`${label}에 로그인한 적이 없어 건너뛰었습니다 (\`kaist login\`).`);
         }
         for (const e of c.errors) result.warnings.push(`${e.step} 실패 [${e.code}] ${e.message}`);
+        if (c.notices) {
+          for (const n of c.notices.changes) result.changes.push({ courseId: null, kind: 'portal_notice', ref: n.pstNo, change: n.change, title: n.title, detail: n.detail });
+          result.warnings.push(...c.notices.warnings);
+          // 파일 단계(요약 md)는 이 단계보다 먼저 돌았으므로 공지 목록만 다시 쓴다
+          const { driveRoot } = loadSettings();
+          if (fs.existsSync(path.dirname(driveRoot))) {
+            try { writeSchoolNotices(driveRoot, semester.label, iso()); }
+            catch (e) { result.warnings.push(`_학교공지.md 작성 실패: ${e instanceof Error ? e.message : String(e)}`); }
+          }
+        }
       } catch (e) { result.warnings.push(`포털·생활관 단계 실패: ${e instanceof Error ? e.message : String(e)}`); }
     }
   } catch (e) {

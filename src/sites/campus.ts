@@ -7,6 +7,7 @@ import { getMeta, openDb, setMeta, tx } from '../store/db.js';
 import { formatKst, nowSec } from '../util/time.js';
 import { SiteHttp } from './http.js';
 import { KDS_HEADERS } from './session.js';
+import { syncPortalNotices, type PortalNoticeResult } from './notices.js';
 import { isMajorPlan, parseCollegePlan, parseDormInfo, parseDormSchedule, parseStulist, type DormInfo, type PlanItem } from './parse.js';
 
 export const todayKst = (sec = nowSec()) => new Date((sec + 9 * 3600) * 1000).toISOString().slice(0, 10);
@@ -146,6 +147,8 @@ export interface CampusResult {
   timetable?: { slots: number };
   plan?: { items: number; major: number };
   dorm?: { changed: boolean };
+  /** 포털 학사 공지 (S8c) */
+  notices?: PortalNoticeResult;
   calendar: CampusPushResult;
   errors: { step: string; code: string; message: string }[];
   requests: number;
@@ -197,6 +200,11 @@ export async function syncCampus(opts: { runId: number | null; calendar?: boolea
         }
       }
     } catch (e) { r.sites.portal = 'error'; fail('portal', e); }
+    // 학사 공지 (S8c): 시간표·학사일정과 별개로 실패는 경고로만
+    if (r.sites.portal === 'ok') {
+      try { r.notices = await syncPortalNotices(http, opts.runId, log); }
+      catch (e) { fail('portal-notices', e); }
+    }
     r.requests += http.requestCount;
   }
 

@@ -79,7 +79,7 @@
 3. Gmail 필터를 만든다: `to:<KAIST 주소>` → 라벨 `KAIST`
 4. Google Cloud 콘솔에서 Gmail API를 켜고, 동의 화면에 `gmail.readonly` 범위를 추가한다.
 5. 본인 KAIST 주소로 테스트 메일을 1통 보낸다. Gmail에 라벨이 붙어 오는지, 발신자가 유지되는지 확인한다.
-6. 구현이 끝나면 `kaist google login`으로 다시 동의한다(7일마다).
+6. 구현이 끝나면 `kaist google login`으로 다시 동의한다(OAuth 앱 게시 뒤로는 7일 만료 없음).
 7. 이미 받은 메일은 전달되지 않는다. 필요한 것만 직접 전달한다.
 
 ## 결정 필요 (사용자)

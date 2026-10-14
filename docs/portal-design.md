@@ -1,7 +1,7 @@
 # S8 설계: KAIST Portal · ERP · 생활관 연결
 
 작성: 2026-10-14
-상태: S8a·S8b 완료 (2026-10-15). 다음은 S8c.
+상태: S8a·S8b·S8c 완료 (2026-10-15). 다음은 S8d.
 근거: 공개 자료 조사(Opus), 로그인 상태 화면 기록 분석(Opus, 구조만), 설계 판단(Fable)
 
 ## 배경 (관찰)
@@ -150,7 +150,7 @@
   - ERP `findNtcnCnt.do`와 `checkLoginPolicy.do`는 만료돼도 `success=true`라 프로브로 쓸 수 없다. 표 1의 ERP 프로브를 `findViewSession.do`로 바꾼다.
   - ERP 성적 요청은 만료되면 JSON 대신 HTML을 돌려준다. 성적 요청에서도 JSON이 아니면 만료로 본다.
   - kds `semesterScheduleList.do`는 로그인 없이도 응답한다(공개 정보).
-- **미확인:** 사이트별 세션 수명(6), recents의 합집합 여부·pstNo 증가(7, S8c에서 확인).
+- **미확인:** 사이트별 세션 수명(6). recents의 합집합 여부·pstNo 증가(7)는 S8c에서 확인했다(아래 S8c 결과).
 
 ## S8a 구현 결과 (2026-10-15)
 
@@ -188,6 +188,14 @@
 - **S8c 학사 공지**
   - `notices --source portal`과 드라이브 `_학교공지.md`(제목 목록)를 만든다.
   - 두 번 연속 sync해도 중복이 0이다.
+  - **결과 (2026-10-15):**
+    - recents는 전체 게시판의 합집합이다(64개 중 16개 게시판이 최근 50건에 섞임, 전체 8만여 건). pstNo는 게시 시각 순으로 커서 내림차순 정렬된다. 고정글(ntcYn=Y)도 제자리에 있다(맨 위로 올라오지 않음).
+    - `recents?boardNos=31`처럼 게시판 하나는 필터가 된다. 번호 여러 개(`31,28,45,23`)는 0건이라 게시판마다 따로 요청한다.
+    - 세미나(23)는 일정형 게시판이라 boardNos 필터·`board/23` 쪽 목록 모두 0건이다(`bgngDt/endDt` 형식 3가지도 0건). 그래서 필터 없는 통합 목록을 50건씩 시간순으로 읽으며 골라낸다. 지난번 가장 새 글 시각(1시간 여유)이나 30일 밖에 닿으면 멈춘다. 첫 백필 8쪽, 이후 1~2쪽.
+    - 본문 `board/recents/{pstNo}?boardNo=N`: pstCn(HTML), boardAtchList(파일명·크기만 저장). 작성자 이름·메일·ID는 저장하지 않고 부서명만 둔다.
+    - 첫 sync: 55건(수강/학적 4, 장학/복지 16, 생활관 0(최근 글이 8/3), 세미나 35), 본문 20건. 두 번째 sync: 새 글 0, 중복 0, 목록 요청 4쪽.
+    - 게시판을 처음 받을 때(30일 백필)는 changes에 넣지 않는다. 이후 새 글·수정은 changes에 `portal_notice`로 남는다.
+  - 코드: `src/sites/notices.ts`(증분·저장·조회), `src/sites/parse.ts`(목록·본문 파서), `PORTAL_BOARDS`(sites.ts), DB `portal_notices`, 검증 스크립트 `scripts/phase0/s8c-*.ts`
 - **S8d 성적**
   - `grades --refresh`를 만든다.
   - 격리 테스트(드라이브·요약·로그에 성적이 없음)를 통과한다.

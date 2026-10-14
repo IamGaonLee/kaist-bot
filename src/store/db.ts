@@ -106,6 +106,14 @@ create table if not exists dorm_info (key text primary key, value text, updated_
 create table if not exists dorm_schedule (
   id text primary key, title text not null, start_date text, end_date text, dorm text, fetched_at text not null
 );
+-- S8c 포털 학사 공지 (작성자 이름·메일은 저장하지 않음, 부서명만)
+create table if not exists portal_notices (
+  pst_no integer primary key, board_no integer not null, board_name text not null, title text not null, dept text,
+  reg_at integer not null, chg_text text not null, pinned integer not null default 0, atch_count integer not null default 0,
+  attachments_json text, body_html text, body_fetched_at text,
+  first_seen_sync_id integer, first_seen_at text not null, updated_at text not null
+);
+create index if not exists portal_notices_reg on portal_notices(reg_at);
 create index if not exists notices_course on notices(course_id, posted_at);
 create index if not exists tasks_due on tasks(due);
 `;

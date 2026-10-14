@@ -172,3 +172,54 @@ test('일정 수정: 종일↔시각 전환 시 이전 칸을 null로 지운다 
   assert.equal((allDay.start as Record<string, unknown>).dateTime, null);
   assert.equal(allDay.start.date, '2026-10-19');
 });
+
+// ---------- S8c ----------
+import { parseBoardList, parsePostDetail, portalDtToSec } from '../src/sites/parse.js';
+import { classifyPage } from '../src/sites/notices.js';
+import { PORTAL_BOARDS } from '../src/sites/sites.js';
+
+const pst = (pstNo: number, regDt: string, extra: Record<string, unknown> = {}) =>
+  ({ pstNo, boardNo: 31, pstTtl: ` 제목 ${pstNo} `, regDt, chgDt: regDt, ntcYn: 'N', atchFileCnt: 0, pstWrtrNm: '작성자', pstWrtrEml: 'a@b.c', pstWrtrDeptNm: '학사팀', ...extra });
+
+test('포털 공지 목록: 필드 검사, 작성자 이름·메일은 꺼내지 않는다', () => {
+  const { posts, totalRecord } = parseBoardList({ data: [pst(3, '2026.10.13 09:55:28', { ntcYn: 'Y', atchFileCnt: 2 })], page: { totalRecord: 1 } });
+  assert.equal(totalRecord, 1);
+  assert.deepEqual(posts[0], { pstNo: 3, boardNo: 31, title: '제목 3', dept: '학사팀', regDt: '2026.10.13 09:55:28', chgDt: '2026.10.13 09:55:28', pinned: true, atchCount: 2 });
+  assert.ok(!JSON.stringify(posts).includes('작성자') && !JSON.stringify(posts).includes('a@b.c'));
+  assert.throws(() => parseBoardList({ data: [pst(1, '2026-10-13 09:55')], page: { totalRecord: 1 } }), /날짜 형식/);
+  assert.throws(() => parseBoardList({ data: [] }), /totalRecord/);
+  assert.equal(portalDtToSec('2026.10.13 09:55:28'), Date.parse('2026-10-13T00:55:28Z') / 1000, 'KST');
+});
+
+test('포털 공지 본문: 다른 글이 오면 오류, 첨부는 파일명·크기만', () => {
+  const d = parsePostDetail({ ...pst(5, '2026.10.13 09:55:28'), pstCn: '<p>본문</p>', boardAtchList: [{ atchFileNm: '안내.hwp', atchFileSize: 100, atchFileSrvrPath: '/x' }] }, 5);
+  assert.deepEqual(d.attachments, [{ name: '안내.hwp', size: 100 }]);
+  assert.equal(d.bodyHtml, '<p>본문</p>');
+  assert.throws(() => parsePostDetail({ ...pst(5, '2026.10.13 09:55:28'), pstCn: '' }, 6), /다른 글/);
+  assert.throws(() => parsePostDetail(pst(5, '2026.10.13 09:55:28'), 5), /pstCn/);
+});
+
+test('포털 공지 증분: 아는 글·30일 밖 글에서 멈추고, 수정된 글은 다시 받는다', () => {
+  const cutoff = portalDtToSec('2026.09.15 00:00:00');
+  const page = (...ps: ReturnType<typeof pst>[]) => parseBoardList({ data: ps, page: { totalRecord: 99 } }).posts;
+  // 처음: 30일 안 2개 + 오래된 1개 → 2개 새 글, 멈춤
+  let c = classifyPage(page(pst(30, '2026.10.13 09:00:00'), pst(20, '2026.10.01 09:00:00'), pst(10, '2026.09.01 09:00:00')), new Map(), cutoff, true, 3);
+  assert.deepEqual([c.fresh.map(p => p.pstNo), c.stop], [[30, 20], true]);
+  // 다음: 꽉 찬 쪽인데 모르는 글뿐 → 다음 쪽 계속
+  c = classifyPage(page(pst(50, '2026.10.14 09:00:00'), pst(40, '2026.10.14 08:00:00')), new Map(), cutoff, true, 2);
+  assert.equal(c.stop, false);
+  // 아는 글을 만나면 멈춤. 수정 시각이 바뀐 글과 본문이 없는 글은 다시 받음
+  const known = new Map([[30, { chgText: '2026.10.13 09:00:00', hasBody: true }], [20, { chgText: '2026.10.01 09:00:00', hasBody: false }]]);
+  c = classifyPage(page(pst(40, '2026.10.14 09:00:00'), pst(30, '2026.10.13 09:00:00', { chgDt: '2026.10.14 10:00:00' }), pst(20, '2026.10.01 09:00:00')), known, cutoff, true, 3);
+  assert.deepEqual([c.fresh.map(p => p.pstNo), c.changed.map(p => p.pstNo), c.stop], [[40], [30, 20], true]);
+  // 제목만 받는 게시판은 본문 없음을 이유로 다시 받지 않는다
+  c = classifyPage(page(pst(20, '2026.10.01 09:00:00')), known, cutoff, false, 3);
+  assert.deepEqual(c.changed, []);
+  // 오래된 고정글은 새 글로 받되 멈춤 판단에는 쓰지 않는다
+  c = classifyPage(page(pst(5, '2026.03.01 09:00:00', { ntcYn: 'Y' }), pst(60, '2026.10.14 09:00:00')), new Map(), cutoff, true, 2);
+  assert.deepEqual([c.fresh.map(p => p.pstNo), c.stop], [[5, 60], false]);
+});
+
+test('포털 공지 게시판: 사용자 결정 3 (31·28·45 본문, 23 제목만)', () => {
+  assert.deepEqual(PORTAL_BOARDS.map(b => `${b.no}:${b.body}:${b.via}`), ['31:true:filter', '28:true:filter', '45:true:filter', '23:false:stream']);
+});

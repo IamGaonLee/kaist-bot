@@ -132,3 +132,68 @@ export function parseDormSchedule(json: unknown): DormScheduleItem[] {
     return { id: String(r.calendarId), title: String(r.calendarCn).trim(), startDate: (r.calendarBeginDe as string) ?? null, endDate: (r.calendarEndDe as string) ?? null, dorm: (r.dormNmCodeNm as string) ?? null };
   });
 }
+
+// ---------- 포털 공지 (board/recents) ----------
+// 작성자 이름·메일·ID는 읽지 않는다. 부서명만 쓴다.
+
+export interface BoardPost {
+  pstNo: number;
+  boardNo: number;
+  title: string;
+  dept: string | null;
+  /** "2026.10.13 09:55:28" (KST) */
+  regDt: string;
+  chgDt: string;
+  pinned: boolean;
+  atchCount: number;
+}
+
+export interface PostDetail extends BoardPost {
+  bodyHtml: string;
+  attachments: { name: string; size: number }[];
+}
+
+const PORTAL_DT = /^(\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
+
+/** 포털 날짜 문자열(KST) → epoch 초 */
+export function portalDtToSec(text: string): number {
+  const m = PORTAL_DT.exec(text);
+  if (!m) throw new ParseError('포털 공지', `날짜 형식이 다릅니다: ${text}`);
+  return Math.floor(Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+09:00`) / 1000);
+}
+
+function toPost(r: Record<string, unknown>, where: string): BoardPost {
+  if (typeof r.pstNo !== 'number' || typeof r.boardNo !== 'number' || typeof r.pstTtl !== 'string' || typeof r.regDt !== 'string') {
+    throw new ParseError(where, '글에 pstNo·boardNo·pstTtl·regDt가 없습니다');
+  }
+  const regDt = r.regDt;
+  const chgDt = typeof r.chgDt === 'string' && r.chgDt ? r.chgDt : regDt;
+  portalDtToSec(regDt);
+  portalDtToSec(chgDt);
+  return {
+    pstNo: r.pstNo, boardNo: r.boardNo, title: r.pstTtl.trim(),
+    dept: typeof r.pstWrtrDeptNm === 'string' && r.pstWrtrDeptNm ? r.pstWrtrDeptNm : null,
+    regDt, chgDt, pinned: r.ntcYn === 'Y', atchCount: typeof r.atchFileCnt === 'number' ? r.atchFileCnt : 0,
+  };
+}
+
+/** 목록 응답 → 글 + 전체 개수 */
+export function parseBoardList(json: unknown): { posts: BoardPost[]; totalRecord: number } {
+  const j = json as { data?: unknown; page?: { totalRecord?: unknown } };
+  if (!Array.isArray(j.data)) throw new ParseError('포털 공지 목록', 'data 배열이 없습니다');
+  if (typeof j.page?.totalRecord !== 'number') throw new ParseError('포털 공지 목록', 'page.totalRecord가 없습니다');
+  return { posts: (j.data as Record<string, unknown>[]).map(r => toPost(r, '포털 공지 목록')), totalRecord: j.page.totalRecord };
+}
+
+/** 본문 응답 (board/recents/{pstNo}) */
+export function parsePostDetail(json: unknown, expectPstNo: number): PostDetail {
+  const r = json as Record<string, unknown>;
+  const post = toPost(r, '포털 공지 본문');
+  if (post.pstNo !== expectPstNo) throw new ParseError('포털 공지 본문', `요청한 글(${expectPstNo})과 다른 글(${post.pstNo})이 왔습니다`);
+  if (typeof r.pstCn !== 'string') throw new ParseError('포털 공지 본문', 'pstCn(본문)이 없습니다');
+  const list = Array.isArray(r.boardAtchList) ? r.boardAtchList as Record<string, unknown>[] : [];
+  return {
+    ...post, bodyHtml: r.pstCn,
+    attachments: list.map(a => ({ name: String(a.atchFileNm ?? ''), size: typeof a.atchFileSize === 'number' ? a.atchFileSize : 0 })).filter(a => a.name),
+  };
+}
