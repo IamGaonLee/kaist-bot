@@ -18,8 +18,10 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 
 사용자가 과제, 마감, 공지, 강의자료를 물으면 `kaist` CLI를 도구로 쓴다. 항상 `--json`을 붙여 결과를 읽는다.
 
-- **조회는 로컬 데이터로 먼저 답한다.** `kaist status --json`의 `lastSync`로 데이터가 얼마나 오래됐는지 알리고 답한다.
-  - 마감·제출 상태: `kaist assignments --json` (`--due 7d`, `--all`, `--course <코드|이름>`)
+- **조회는 로컬 데이터로 먼저 답한다.** 모든 조회 JSON에 `lastSyncKst`와 `lastSyncMinutesAgo`가 있다. 데이터가 얼마나 오래됐는지 함께 알린다.
+  - "새로 올라온 거": 먼저 `kaist changes --json`(마지막 sync의 변경, `--runs 3`으로 여러 회)을 본다. 오래됐으면 sync를 제안한다.
+  - 마감·제출 상태: `kaist assignments --json` (`--due 7d`, `--all`, `--course <코드|이름>`). 각 과제에 `hoursLeft`, `submission`(submitted/noattempt 등), `descriptionFile`(설명.md), `attachments[].localPath`가 있다.
+  - 시험 일정: 지금은 `kaist cal list --json`의 `[과목] 중간고사/기말고사` 일정(직접 넣은 것, "(계획서 기준)"이면 바뀌었을 수 있음). S6 이후 `kaist events`
   - 공지: `kaist notices --since 3d --json` (본문이 필요하면 `--body`)
   - 강의자료: `kaist files --json` (`--new`는 마지막 sync에서 받은 것), 영상 링크: `kaist videos --json`
   - 캘린더: `kaist cal list --json`
