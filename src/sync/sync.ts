@@ -6,6 +6,7 @@ import { BlockedError, KaistError, NotAvailableError, SessionExpiredError } from
 import { collectCandidates, executeDownloads, planFiles, recordPlan } from '../files/download.js';
 import { writeMarkdown } from '../files/markdown.js';
 import { renderPdfs } from '../files/pdf.js';
+import { findDropped, handleDropped } from '../files/dropped.js';
 import { pushDeadlines, type PushResult } from '../cal/push.js';
 import { hasGoogleToken } from '../google/oauth.js';
 import { parseAssignPage } from '../klms/adapters/assign-page.js';
@@ -26,7 +27,7 @@ const MAX_BOARD_PAGES = 30;
 
 export interface Change {
   courseId: number;
-  kind: 'module' | 'task' | 'notice';
+  kind: 'module' | 'task' | 'notice' | 'course';
   ref: number;
   change: 'new' | 'changed' | 'removed' | 'due_changed' | 'status_changed' | 'needs_review';
   title: string;
@@ -188,6 +189,14 @@ async function fileStage(session: KlmsSession, semesterLabel: string, courseIds:
     return undefined;
   }
   const db = openDb();
+  // 수강 목록에서 빠진 과목: 폴더를 "_수강취소_"로 바꾸고 안내를 남긴다 (자료는 보존)
+  const dropped = handleDropped(driveRoot, semesterLabel, findDropped(semesterLabel));
+  const droppedMd: string[] = [];
+  for (const d of dropped) {
+    result.changes.push({ courseId: d.id, kind: 'course', ref: d.id, change: 'removed', title: `${d.code} ${d.name}`, detail: '수강 목록에서 빠짐 (드라이브 폴더 보관)' });
+    result.warnings.push(`${d.code} ${d.name}이(가) KLMS 수강 목록에 없어 수집을 멈췄습니다. 드라이브 폴더는 "${d.folder ? path.basename(d.folder) : '없음'}"로 보관했습니다.`);
+    if (d.folder) droppedMd.push(path.join(d.folder, '_과목정보.md'));
+  }
   log('받을 파일 확인 중...');
   const cands = collectCandidates(driveRoot, semesterLabel, courseIds);
   const plan = await planFiles(session, cands);
@@ -232,7 +241,7 @@ async function fileStage(session: KlmsSession, semesterLabel: string, courseIds:
   // 사람이 볼 PDF: 학기 요약과 과목 정보만 (과제 설명.md는 제외). 실패해도 수집 결과는 유지
   log('요약 PDF 만드는 중...');
   try {
-    const pdf = await renderPdfs(mdFiles.filter(f => /_(요약|과목정보)\.md$/.test(f)));
+    const pdf = await renderPdfs([...mdFiles.filter(f => /_(요약|과목정보)\.md$/.test(f)), ...droppedMd.filter(f => fs.existsSync(f))]);
     stage.pdfWritten = pdf.written.length;
     for (const [file, err] of pdf.failed) result.warnings.push(`PDF 생성 실패: ${path.basename(file)} — ${err}`);
   } catch (e) {

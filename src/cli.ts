@@ -7,7 +7,7 @@ import { SessionStore } from './klms/session-store.js';
 import { ensureSession, interactiveLogin, probe, resumeSession } from './klms/session.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta } from './store/db.js';
-import { listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
+import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
 import { runDoctor } from './sync/doctor.js';
 import { matchCourse, runSync, type SyncResult } from './sync/sync.js';
 import { formatKst, nowSec, parseDuration } from './util/time.js';
@@ -37,6 +37,12 @@ function run<A extends unknown[]>(fn: (...args: A) => Promise<void>) {
       process.exitCode = exitCodeOf(e);
     }
   };
+}
+
+/** 조회 결과에 붙이는 데이터 신선도 (에이전트가 시간대 계산 없이 쓰도록 KST와 경과 분) */
+function syncInfo() {
+  const lastSync = getMeta('last_sync_at');
+  return { lastSync, lastSyncKst: lastSync ? formatKst(Math.floor(Date.parse(lastSync) / 1000)) : null, lastSyncMinutesAgo: lastSync ? minutesSince(lastSync) : null };
 }
 
 const minutesSince = (iso: string) => Math.round((Date.now() - Date.parse(iso)) / 60000);
@@ -72,7 +78,7 @@ program.command('status')
     const data = {
       session: saved ? { savedAt: saved.savedAt, lastUsedAt: saved.lastUsedAt, idleMinutes: minutesSince(saved.lastUsedAt), valid } : null,
       courses: cache ? { semester: cache.semester.label, count: cache.courses.length, fetchedAt: cache.fetchedAt } : null,
-      lastSync: getMeta('last_sync_at'),
+      ...syncInfo(),
     };
     output(opts.json, data, d => [
       d.session
@@ -146,7 +152,7 @@ function syncText(r: SyncResult): string {
   if (interesting.length) {
     lines.push(`변경 ${interesting.length}건:`);
     const shown = interesting.slice(0, 60);
-    for (const c of shown) lines.push(`  [${CHANGE_LABEL[c.change]}] ${code.get(c.courseId) ?? c.courseId} ${c.kind === 'notice' ? '글' : c.kind === 'task' ? '과제' : c.detail ?? '활동'}: ${c.title}${c.detail && c.kind === 'task' && c.change !== 'new' ? ` (${c.detail})` : ''}`);
+    for (const c of shown) lines.push(`  [${CHANGE_LABEL[c.change]}] ${c.kind === 'course' ? '' : (code.get(c.courseId) ?? c.courseId) + ' '}${c.kind === 'notice' ? '글' : c.kind === 'task' ? '과제' : c.kind === 'course' ? '과목' : c.detail ?? '활동'}: ${c.title}${c.detail && c.kind === 'task' && c.change !== 'new' ? ` (${c.detail})` : ''}`);
     if (interesting.length > shown.length) lines.push(`  … 외 ${interesting.length - shown.length}건 (--json으로 전체 확인)`);
   } else lines.push('변경 없음');
   if (r.files) {
@@ -201,8 +207,7 @@ program.command('assignments')
   .action(run(async (opts: { due?: string; all?: boolean; course?: string; json?: boolean }) => {
     requireSynced();
     const tasks = listTasks({ now: nowSec(), withinSec: opts.due ? parseDuration(opts.due) : undefined, all: opts.all, course: courseIds(opts.course) });
-    const lastSync = getMeta('last_sync_at');
-    output(opts.json, { lastSync, tasks }, d => [
+    output(opts.json, { ...syncInfo(), tasks }, d => [
       `과제 ${d.tasks.length}개 (마지막 수집 ${fmtTime(d.lastSync!)})`,
       ...d.tasks.map(t => `  ${t.needsReview ? '⚠ ' : ''}${t.dueKst ?? '마감 없음'.padEnd(16)}  ${t.course.padEnd(13)} ${t.name}` +
         `  [${t.submissionText ?? (t.type === 'quiz' ? '퀴즈' : '상태 미확인')}]${t.removed ? ' (KLMS에서 사라짐)' : ''}` +
@@ -221,7 +226,7 @@ program.command('notices')
   .action(run(async (opts: { since?: string; course?: string; kind: string; body?: boolean; limit: string; json?: boolean }) => {
     requireSynced();
     const notices = listNotices({ sinceSec: opts.since ? nowSec() - parseDuration(opts.since) : undefined, course: courseIds(opts.course), kind: opts.kind, body: opts.body, limit: Number(opts.limit) });
-    output(opts.json, { lastSync: getMeta('last_sync_at'), notices }, d => [
+    output(opts.json, { ...syncInfo(), notices }, d => [
       `글 ${d.notices.length}개 (마지막 수집 ${fmtTime(d.lastSync!)})`,
       ...d.notices.map(n => `  ${n.postedKst ?? '-'}  ${n.course.padEnd(13)} [${n.board}] ${n.title}${n.attachments.length ? ` (첨부 ${n.attachments.length})` : ''}` +
         (n.bodyText ? `\n${n.bodyText.split('\n').map(l => '      ' + l).join('\n')}` : '')),
@@ -235,7 +240,21 @@ program.command('videos')
   .action(run(async (opts: { course?: string; json?: boolean }) => {
     requireSynced();
     const videos = listVideos({ course: courseIds(opts.course) });
-    output(opts.json, { videos }, d => [`영상 링크 ${d.videos.length}개`, ...d.videos.map(v => `  ${v.course.padEnd(13)} ${v.section ?? ''} | ${v.name}\n      ${v.url}`)].join('\n'));
+    output(opts.json, { ...syncInfo(), videos }, d => [`영상 링크 ${d.videos.length}개`, ...d.videos.map(v => `  ${v.course.padEnd(13)} ${v.section ?? ''} | ${v.name}\n      ${v.url}`)].join('\n'));
+  }));
+
+program.command('changes')
+  .description('최근 sync에서 새로 생기거나 바뀐 것 (로컬 데이터, 브리핑용)')
+  .option('--runs <n>', '최근 몇 번의 sync까지', '1')
+  .option('--course <과목>', '특정 과목만')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { runs: string; course?: string; json?: boolean }) => {
+    requireSynced();
+    const r = listChanges({ runs: Math.max(1, Number(opts.runs) || 1), course: courseIds(opts.course) });
+    output(opts.json, { ...syncInfo(), ...r }, d => [
+      `최근 sync ${d.runs.length}회 (${d.runs.map(x => x.finishedKst).join(', ')}) 변경 ${d.changes.length}건`,
+      ...d.changes.map(c => `  [${CHANGE_LABEL[c.change] ?? c.change}] ${c.course ?? ''} ${c.kind === 'notice' ? '글' : c.kind === 'task' ? '과제' : '자료'}: ${c.title}${c.detail ? ` (${c.detail})` : ''}`),
+    ].join('\n'));
   }));
 
 program.command('files')
@@ -246,7 +265,7 @@ program.command('files')
   .action(run(async (opts: { new?: boolean; course?: string; json?: boolean }) => {
     requireSynced();
     const files = listFiles({ course: courseIds(opts.course), onlyNew: opts.new });
-    output(opts.json, { files }, d => [
+    output(opts.json, { ...syncInfo(), files }, d => [
       `파일 ${d.files.length}개${opts.new ? ' (마지막 sync에서 받음)' : ''}`,
       ...d.files.map(f => `  ${f.course.padEnd(13)} [${f.statusLabel}] ${f.filename}${f.localPath ? `\n      ${f.localPath}` : ''}`),
     ].join('\n'));

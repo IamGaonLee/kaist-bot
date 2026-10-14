@@ -10,6 +10,11 @@ import { courseDir, semesterDir } from './layout.js';
 import { taskFolder } from './download.js';
 
 const td = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
+// 교수가 마감을 고칠 때 취소선을 쓴다 ("<del>October 19th</del> October 17th") → 지워진 값이 남아 보이지 않게 ~~ ~~로 보존
+td.addRule('strikethrough', {
+  filter: node => ['DEL', 'S', 'STRIKE'].includes(node.nodeName) || /line-through/.test((node as HTMLElement).getAttribute?.('style') ?? ''),
+  replacement: content => (content.trim() ? `~~${content.trim()}~~` : ''),
+});
 const toMd = (html: string | null) => (html ? td.turndown(html).replace(/\n{3,}/g, '\n\n').trim() : '');
 const rel = (from: string, to: string) => path.relative(from, to).split(path.sep).map(encodeURIComponent).join('/');
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');

@@ -6,12 +6,13 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 
 - S0 완료 (설계 문서 v0.2, CLAUDE.md, 2026-10-14 승인)
 - S1 완료: 인증과 과목 목록
-- S2 완료 (2026-10-14): `sync`(과목 구성·과제·공지), `assignments`, `notices`, `videos`, `doctor`. 사용자 대조(과제 3개 이상 KLMS 화면과 비교) 대기
-- S3 완료 (2026-10-14): 파일 다운로드(105개), 드라이브 폴더, `_요약.md`/`_과목정보.md`/과제 `설명.md`, `files`. 사용자 확인 대기: 휴대폰 드라이브 앱에서 `_요약.md` 열기
-- S4 완료 (2026-10-14): 구글 "KLMS" 캘린더 마감 15개 등록, 재반영 시 변경 0. OAuth는 테스트 상태라 7일마다 `kaist cal login` 필요. 사용자 확인 대기: 휴대폰 캘린더 앱에서 보이는지`n- 다음: S5 에이전트 연결과 다듬기 (실제 대화 시나리오) → S6 학사 일정 추출(`docs/school-events-design.md`) → Dooray 메일 → Portal
+- S2 완료 (2026-10-14): `sync`(과목 구성·과제·공지), `assignments`, `notices`, `videos`, `doctor`. 사용자 대조 완료(과제 3개 일치)
+- S3 완료 (2026-10-14): 파일 다운로드(105개), 드라이브 폴더, 요약 md/PDF, 과제 `설명.md`, `files`. 휴대폰 확인 완료
+- S4 완료 (2026-10-14): 구글 "KLMS" 캘린더 마감 15개 + 시험 8건(수동). OAuth는 테스트 상태라 7일마다 `kaist cal login` 필요. 휴대폰 확인 완료
+- **S5 진행 중**: 에이전트 연결과 다듬기
+- 다음: S6 학사 일정 추출(`docs/school-events-design.md`) → Dooray 메일 → Portal
 - 사용자 할 일:
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
-  - S3 전까지 Google Drive for desktop 설치
 
 ## 에이전트로 쓸 때 (학교생활 논의)
 

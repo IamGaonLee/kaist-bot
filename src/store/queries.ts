@@ -1,6 +1,11 @@
 // 조회 명령용 로컬 데이터 쿼리 (KLMS에 접속하지 않음)
 import { formatKst } from '../util/time.js';
-import { openDb } from './db.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadSettings } from '../config.js';
+import { taskFolder } from '../files/download.js';
+import { courseDir } from '../files/layout.js';
+import { getMeta, openDb } from './db.js';
 
 export interface TaskView {
   cmid: number;
@@ -18,6 +23,19 @@ export interface TaskView {
   grading: string | null;
   removed: boolean;
   url: string;
+  /** 마감까지 남은 시간(시간 단위, 지났으면 음수) */
+  hoursLeft: number | null;
+  /** 드라이브의 과제 폴더와 설명 파일 (과제를 같이 풀 때 읽을 곳) */
+  folder: string | null;
+  descriptionFile: string | null;
+  attachments: { filename: string; localPath: string | null }[];
+}
+
+/** 과제 폴더 경로 계산에 필요한 값 */
+function driveContext(): { root: string; semester: string } | null {
+  const sem = getMeta('semester');
+  if (!sem) return null;
+  return { root: loadSettings().driveRoot, semester: (JSON.parse(sem) as { label: string }).label };
 }
 
 export function listTasks(opts: { now: number; withinSec?: number; all?: boolean; course?: number[] }): TaskView[] {
@@ -50,7 +68,23 @@ export function listTasks(opts: { now: number; withinSec?: number; all?: boolean
       grading: r.grading_code,
       removed: !!r.removed_at,
       url: r.url ?? `https://klms.kaist.ac.kr/mod/${r.modname}/view.php?id=${r.cmid}`,
+      ...taskFiles(r, opts.now),
     }));
+}
+
+function taskFiles(r: Record<string, any>, now: number): Pick<TaskView, 'hoursLeft' | 'folder' | 'descriptionFile' | 'attachments'> {
+  const hoursLeft = r.due === null ? null : Math.round((r.due - now) / 360) / 10;
+  const ctx = driveContext();
+  if (r.modname !== 'assign' || !ctx) return { hoursLeft, folder: null, descriptionFile: null, attachments: [] };
+  const folder = taskFolder(courseDir(ctx.root, ctx.semester, { code: r.code, name: r.course_name }), r.course_id, r.cmid, r.name);
+  const desc = path.join(folder, '설명.md');
+  const files = openDb().prepare(`select filename, local_path from files where source = 'assign' and ref = ?`).all(r.cmid) as { filename: string; local_path: string | null }[];
+  return {
+    hoursLeft,
+    folder: fs.existsSync(folder) ? folder : null,
+    descriptionFile: fs.existsSync(desc) ? desc : null,
+    attachments: files.map(f => ({ filename: f.filename, localPath: f.local_path && fs.existsSync(f.local_path) ? f.local_path : null })),
+  };
 }
 
 export interface NoticeView {
@@ -137,4 +171,25 @@ export function listVideos(opts: { course?: number[] }): VideoView[] {
   return rows
     .filter(r => !opts.course || opts.course.includes(r.course_id))
     .map(r => ({ cmid: r.cmid, course: r.code, section: r.section_name, name: r.name, url: r.url ?? `https://klms.kaist.ac.kr/mod/lti/view.php?id=${r.cmid}` }));
+}
+
+export interface ChangeView { runId: number; finishedAt: string; finishedKst: string; course: string | null; kind: string; change: string; title: string; detail: string | null }
+
+/** 최근 sync들의 변경 내역 (KLMS 접속 없이 브리핑용) */
+export function listChanges(opts: { runs: number; course?: number[] }): { runs: { id: number; finishedAt: string; finishedKst: string; status: string }[]; changes: ChangeView[] } {
+  const db = openDb();
+  const runs = (db.prepare(`select id, finished_at, status from sync_runs where finished_at is not null and status <> 'aborted' order by id desc limit ?`).all(opts.runs) as { id: number; finished_at: string; status: string }[])
+    .map(r => ({ id: r.id, finishedAt: r.finished_at, finishedKst: formatKst(Math.floor(Date.parse(r.finished_at) / 1000)), status: r.status }));
+  if (runs.length === 0) return { runs, changes: [] };
+  const ids = runs.map(r => r.id);
+  const rows = db.prepare(`select ch.*, c.code from changes ch left join courses c on c.id = ch.course_id where ch.run_id in (${ids.map(() => '?').join(',')}) order by ch.run_id desc`).all(...ids) as Record<string, any>[];
+  const fin = new Map(runs.map(r => [r.id, r]));
+  return {
+    runs,
+    changes: rows
+      .filter(r => !opts.course || opts.course.includes(r.course_id))
+      // 활동 내용 해시만 바뀐 것(상태 문구 변화 등)은 잡음이라 뺀다. 파일 받음/새 버전은 남긴다
+      .filter(r => !(r.kind === 'module' && r.change === 'changed' && !String(r.detail ?? '').startsWith('파일') && !String(r.detail ?? '').startsWith('받지 않음')))
+      .map(r => ({ runId: r.run_id, finishedAt: fin.get(r.run_id)!.finishedAt, finishedKst: fin.get(r.run_id)!.finishedKst, course: r.code ?? null, kind: r.kind, change: r.change, title: r.title, detail: r.detail })),
+  };
 }

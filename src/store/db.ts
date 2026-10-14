@@ -83,6 +83,8 @@ function migrate(d: DatabaseSync): void {
   add('files', 'dl_length', 'integer');
   // 과제 페이지를 마지막으로 성공적으로 처리했을 때의 updates_since 서명
   add('tasks', 'page_sig', 'text');
+  // 수강 목록에서 빠진 과목을 처리한 시각 (src/files/dropped.ts)
+  add('courses', 'dropped_at', 'text');
   d.exec(`update files set dl_etag = etag, dl_last_modified = last_modified, dl_length = length where status = 'ok' and dl_length is null`);
   d.exec(`update tasks set page_sig = (select updates_sig from modules where modules.cmid = tasks.cmid) where page_sig is null and page_fetched_at is not null`);
 }
