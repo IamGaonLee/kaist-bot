@@ -12,7 +12,8 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - S5 완료 (2026-10-14): 에이전트용 출력 다듬기(`changes`, 과제 경로·남은 시간, 신선도), 수강 취소 과목 처리. 대화 시나리오 4개는 사용자가 생략하고 넘어감(실사용 중 확인)
 - S6 완료 (2026-10-14): 학사 일정 추출 `kaist events` (후보·검사·A/B등급·undo), 기존 시험 8건 이전, 첫 처리로 휴강·퀴즈·발표·온라인 13건 추가(A 1건 자동, B 12건 확인), `kaist summary`
 - S7 완료 (2026-10-14): 학교 메일 (Dooray→Gmail 자동 전달, `gmail.readonly`). 8/31 이후 368통 저장, 후보 규칙(인용 잘라내기·중복 합치기·옛 과목번호 별칭). `docs/mail-design.md`
-- 다음: Portal (새 설계 문서 먼저)
+- S8a 완료 (2026-10-15): `kaist login` 한 번(폰 승인 1회)으로 포털→KLMS·ERP·생활관 연쇄 로그인, `session.json` v2(사이트별 쿠키, SSO 쿠키 제외), `status --check` 사이트 4개, 허용 목록 HTTP 계층(`src/sites/`). 설계 `docs/portal-design.md`
+- 다음: S8b 시간표·학사일정·기숙사
 - 사용자 할 일:
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
 
@@ -63,10 +64,10 @@ src/               CLI 본체 (S1부터)
 
 - 빌드 `npm run build` (dist/), 전역 명령 연결 `npm link` → `kaist`
 - 개발 실행 `npm run dev -- <명령>`, 테스트 `npm test` (tests/, 합성 데이터만)
-- 코드 배치: `src/sso/`(사이트 무관 로그인 창), `src/klms/`(site.ts 상수·판별, http.ts 공통 계층, ajax.ts, session.ts, courses.ts), `src/store/`(로컬 데이터)
+- 코드 배치: `src/sso/`(사이트 무관 로그인 창·연쇄), `src/sites/`(포털·ERP·kds 허용 목록 `sites.ts`, HTTP, 프로브), `src/klms/`(site.ts 상수·판별, http.ts 공통 계층, ajax.ts, session.ts, courses.ts), `src/store/`(로컬 데이터)
 - 종료 코드: 0 성공, 1 오류, 2 세션 만료(`--no-login`), 3 로그인 취소, 4 사용자 확인 필요(B등급, 삭제·되돌리기 미리보기)
 - 명령 (모두 `--json` 지원):
-  - `kaist login [--force]`, `kaist status [--check]`, `kaist courses [--refresh] [--no-login]`
+  - `kaist login [--force] [--only klms|portal|erp|kds]`, `kaist status [--check]`(사이트별 유효/만료), `kaist courses [--refresh] [--no-login]`
   - `kaist sync [--course X] [--no-login]`: KLMS 접속. 과목 페이지, updates_since, 캘린더(사이트 전체 월별), 과제 페이지(새것·변경·마감 임박만), 게시판 새 글
   - `kaist assignments [--due 7d] [--all] [--course X]`, `kaist notices [--since 3d] [--kind notice|qna|board] [--body]`, `kaist videos`: 로컬 DB만
   - `kaist doctor [과목] [--offline]`: 불변식 검사 (DB 변경 없음)

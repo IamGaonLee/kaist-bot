@@ -2,9 +2,9 @@
 import { Command } from 'commander';
 import { KaistError, exitCodeOf } from './errors.js';
 import { fetchCurrentCourses, type Course } from './klms/courses.js';
-import { KlmsHttp } from './klms/http.js';
-import { SessionStore } from './klms/session-store.js';
-import { ensureSession, interactiveLogin, probe, resumeSession } from './klms/session.js';
+import { SITES, type SiteId } from './klms/session-store.js';
+import { ensureSession } from './klms/session.js';
+import { loginAll, probeSite, siteStatuses } from './sites/session.js';
 import { loadCourses, saveCourses } from './store/courses-cache.js';
 import { getMeta, setMeta } from './store/db.js';
 import { listChanges, listFiles, listNotices, listTasks, listVideos } from './store/queries.js';
@@ -54,43 +54,59 @@ function syncInfo() {
 const minutesSince = (iso: string) => Math.round((Date.now() - Date.parse(iso)) / 60000);
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
 
+/** 한글은 2칸으로 세어 맞춘다 */
+const padWide = (t: string, n: number) => t + ' '.repeat(Math.max(1, n - [...t].reduce((w, ch) => w + (/[ㄱ-힣]/.test(ch) ? 2 : 1), 0)));
+
+const STATE_LABEL: Record<string, string> = { ok: '유효', expired: '만료', 'no-session': '없음', error: '확인 실패' };
+
 program.command('login')
-  .description('세션을 확인하고, 만료됐으면 브라우저 창으로 로그인')
+  .description('세션을 확인하고, 만료됐으면 브라우저 창으로 로그인 (포털 → KLMS·ERP·생활관 연쇄, 폰 승인 1회)')
   .option('--force', '세션이 살아 있어도 다시 로그인')
+  .option('--only <site>', '이 사이트만 로그인 (klms|portal|erp|kds)')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { force?: boolean; json?: boolean }) => {
-    const store = new SessionStore();
-    let reused = false;
-    if (!opts.force) reused = (await resumeSession(store)) !== null;
-    if (!reused) await interactiveLogin(store, status);
-    output(opts.json, { loggedIn: true, reused }, d => d.reused ? '이미 로그인되어 있습니다 (세션 재사용).' : '로그인했습니다. 세션을 저장했습니다.');
+  .action(run(async (opts: { force?: boolean; only?: string; json?: boolean }) => {
+    if (opts.only && !(SITES as readonly string[]).includes(opts.only)) throw new KaistError('BAD_ARGS', `--only는 ${SITES.join('|')} 중 하나입니다.`);
+    const only = opts.only as SiteId | undefined;
+    const targets: SiteId[] = only ? [only] : [...SITES];
+    // 살아 있는 세션은 다시 로그인하지 않는다 (프로브 사이트당 1건)
+    const before: Record<string, string> = {};
+    if (!opts.force) for (const s of targets) before[s] = await probeSite(s);
+    if (!opts.force && targets.every(s => before[s] === 'ok')) {
+      output(opts.json, { loggedIn: true, reused: true, sites: targets.map(site => ({ site, chained: false, state: 'ok' })) }, () => '이미 로그인되어 있습니다 (세션 재사용).');
+      return;
+    }
+    const r = await loginAll({ only, onStatus: status });
+    const failed = r.sites.filter(x => x.state !== 'ok');
+    if (failed.length) process.exitCode = 1;
+    output(opts.json, { loggedIn: failed.length === 0, reused: false, sites: r.sites }, d => [
+      failed.length ? '로그인했지만 일부 사이트 세션을 확인하지 못했습니다.' : '로그인했습니다. 세션을 저장했습니다.',
+      ...d.sites.map(x => `  ${x.site.padEnd(6)} ${STATE_LABEL[x.state]}${x.chained ? '' : ' (연쇄 실패)'}`),
+    ].join('\n'));
   }));
 
 program.command('status')
-  .description('세션 상태, 마지막 수집 시각, 과목 수 (기본은 로컬 정보만)')
-  .option('--check', 'KLMS에 접속해 세션이 유효한지 확인 (요청 1건)')
+  .description('사이트별 세션 상태, 마지막 수집 시각, 과목 수 (기본은 로컬 정보만)')
+  .option('--check', '사이트마다 접속해 세션이 유효한지 확인 (사이트당 요청 1건)')
   .option('--json', 'JSON 출력')
   .action(run(async (opts: { check?: boolean; json?: boolean }) => {
-    const store = new SessionStore();
-    const saved = store.load();
-    let valid: boolean | null = null;
-    if (opts.check && saved) {
-      const http = new KlmsHttp(saved, store);
-      const p = await probe(http);
-      valid = p.ok;
-      if (p.ok) http.persist();
-    } else if (opts.check) valid = false;
+    const sites = siteStatuses();
+    if (opts.check) for (const s of sites) s.state = await probeSite(s.site);
+    const klms = sites.find(s => s.site === 'klms')!;
     const cache = loadCourses();
     const data = {
-      session: saved ? { savedAt: saved.savedAt, lastUsedAt: saved.lastUsedAt, idleMinutes: minutesSince(saved.lastUsedAt), valid } : null,
+      // 기존 호환: KLMS 세션
+      session: klms.saved ? { savedAt: klms.savedAt!, lastUsedAt: klms.lastUsedAt!, idleMinutes: minutesSince(klms.lastUsedAt!), valid: klms.state === null ? null : klms.state === 'ok' } : null,
+      sites: sites.map(s => ({ ...s, idleMinutes: s.lastUsedAt ? minutesSince(s.lastUsedAt) : null })),
       courses: cache ? { semester: cache.semester.label, count: cache.courses.length, fetchedAt: cache.fetchedAt } : null,
       ...syncInfo(),
     };
     output(opts.json, data, d => [
-      d.session
-        ? `세션: 저장됨 (로그인 ${fmtTime(d.session.savedAt)}, 마지막 사용 ${d.session.idleMinutes}분 전)` +
-          (d.session.valid === null ? ' — 유효 여부는 --check로 확인' : d.session.valid ? ' — 유효' : ' — 만료')
-        : '세션: 없음 또는 파일 손상 (`kaist login` 필요)',
+      '세션:',
+      ...d.sites.map(s => `  ${padWide(s.label, 7)}` + (s.saved
+        ? `저장됨 (로그인 ${fmtTime(s.savedAt!)}, 마지막 사용 ${s.idleMinutes}분 전)` + (s.state === null ? '' : ` — ${STATE_LABEL[s.state]}`)
+        : '없음' + (s.state === null || s.state === 'no-session' ? '' : ` — ${STATE_LABEL[s.state]}`))),
+      ...(d.sites.some(s => s.state === null) && opts.check !== true ? ['  유효 여부는 --check로 확인'] : []),
+      ...(d.sites.some(s => !s.saved || (s.state && s.state !== 'ok')) ? ['  다시 로그인: `kaist login` (폰 승인 1회)'] : []),
       d.courses ? `과목: ${d.courses.semester} ${d.courses.count}개 (목록 갱신 ${fmtTime(d.courses.fetchedAt)})` : '과목: 아직 가져오지 않음 (`kaist courses --refresh`)',
       `마지막 수집: ${d.lastSync ? `${fmtTime(d.lastSync)} (${minutesSince(d.lastSync)}분 전)` : '없음'}`,
     ].join('\n'));

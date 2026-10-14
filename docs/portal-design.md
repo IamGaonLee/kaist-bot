@@ -1,7 +1,7 @@
 # S8 설계: KAIST Portal · ERP · 생활관 연결
 
 작성: 2026-10-14
-상태: 사용자 결정 3개와 S8a 검증 완료. S8a 구현 중.
+상태: S8a 완료 (2026-10-15). 다음은 S8b.
 근거: 공개 자료 조사(Opus), 로그인 상태 화면 기록 분석(Opus, 구조만), 설계 판단(Fable)
 
 ## 배경 (관찰)
@@ -151,6 +151,15 @@
   - ERP 성적 요청은 만료되면 JSON 대신 HTML을 돌려준다. 성적 요청에서도 JSON이 아니면 만료로 본다.
   - kds `semesterScheduleList.do`는 로그인 없이도 응답한다(공개 정보).
 - **미확인:** 사이트별 세션 수명(6), recents의 합집합 여부·pstNo 증가(7, S8c에서 확인).
+
+## S8a 구현 결과 (2026-10-15)
+
+- 코드: `src/sso/browser-login.ts`(`chainLogin`), `src/sites/sites.ts`(허용 목록·금지 경로), `src/sites/http.ts`(`SiteHttp`, 동시 1개·500ms), `src/sites/session.ts`(프로브·`loginAll`), `src/klms/session-store.ts`(v2, v1 자동 이전)
+- KLMS 세션이 만료돼 sync가 로그인 창을 열 때도 같은 연쇄 로그인을 쓴다.
+- 완료 기준 확인:
+  - `kaist login`: 폰 승인 1회로 4개 사이트 저장, 브라우저를 닫은 뒤 프로브 4개 유효
+  - 사이트 하나씩 쿠키를 망가뜨린 사본(`KAIST_HOME`)으로 `status --check`: 그 사이트만 만료, 나머지 유효 (4가지 모두)
+  - 단위 테스트 `tests/s8.test.ts`: v1 이전, 사이트별 저장, 허용 목록에 변경 동사 없음, kds 금지 경로 거부, 사이트별 만료 판별, 쿠키 분리
 
 ## 단계와 완료 기준
 

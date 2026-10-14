@@ -92,6 +92,11 @@ export async function ensureSession(opts: { interactive: boolean; onStatus?: (m:
   const resumed = await resumeSession(store);
   if (resumed) return resumed;
   if (!opts.interactive) throw new SessionExpiredError('세션 확인');
-  opts.onStatus?.('세션이 없거나 만료되어 로그인 창을 엽니다.');
-  return interactiveLogin(store, opts.onStatus);
+  opts.onStatus?.('세션이 없거나 만료되어 로그인 창을 엽니다 (포털에서 로그인 → KLMS·ERP·생활관 연쇄).');
+  // 순환 import를 피해 실행 시점에 불러온다
+  const { loginAll } = await import('../sites/session.js');
+  await loginAll({ onStatus: opts.onStatus, store });
+  const after = await resumeSession(store);
+  if (!after) throw new KaistError('LOGIN_VERIFY_FAILED', 'KLMS 연쇄 로그인 뒤 세션이 확인되지 않습니다. `kaist login --only klms`로 다시 시도해 주세요.');
+  return after;
 }

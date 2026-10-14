@@ -1,7 +1,12 @@
 // 세션 쿠키 파일 (%LOCALAPPDATA%\kaist-cli\session.json). 세션의 유일한 저장소.
+// v2: 사이트별 쿠키 {version:2, sites:{klms|portal|erp|kds}}. v1(KLMS 쿠키만)은 읽을 때 klms로 옮긴다.
+// SSO(sso.kaist.ac.kr) 쿠키는 저장하지 않는다 (사용자 개입 없이 세션을 새로 만드는 일을 막는다).
 import fs from 'node:fs';
 import path from 'node:path';
 import { paths, ensureDir } from '../config.js';
+
+export const SITES = ['klms', 'portal', 'erp', 'kds'] as const;
+export type SiteId = (typeof SITES)[number];
 
 export interface StoredCookie {
   name: string;
@@ -18,29 +23,59 @@ export interface SessionFile {
   cookies: StoredCookie[];
 }
 
-export class SessionStore {
-  constructor(private readonly file = paths.session) {}
+interface FileV2 {
+  version: 2;
+  sites: Partial<Record<SiteId, SessionFile>>;
+}
 
-  load(): SessionFile | null {
-    if (!fs.existsSync(this.file)) return null;
-    try {
-      const text = fs.readFileSync(this.file, 'utf8').replace(/^﻿/, ''); // 편집기가 붙인 BOM 허용
-      const data = JSON.parse(text) as SessionFile;
-      return Array.isArray(data.cookies) ? data : null;
-    } catch {
-      return null; // 깨진 파일은 세션 없음으로 본다
-    }
+const isSession = (x: unknown): x is SessionFile => !!x && Array.isArray((x as SessionFile).cookies);
+
+/** 파일 내용 → v2. v1은 klms로 옮기고, 깨진 항목은 버린다 */
+export function parseSessionFile(text: string): FileV2 {
+  let data: unknown;
+  try { data = JSON.parse(text.replace(/^﻿/, '')); } catch { return { version: 2, sites: {} }; } // 편집기가 붙인 BOM 허용
+  if (data && (data as FileV2).version === 2 && typeof (data as FileV2).sites === 'object') {
+    const sites: FileV2['sites'] = {};
+    for (const s of SITES) { const v = (data as FileV2).sites[s]; if (isSession(v)) sites[s] = v; }
+    return { version: 2, sites };
+  }
+  return { version: 2, sites: isSession(data) ? { klms: data } : {} };
+}
+
+/** 한 사이트의 세션을 읽고 쓴다. 같은 파일을 여러 사이트가 나눠 쓴다 */
+export class SessionStore {
+  constructor(private readonly file = paths.session, readonly site: SiteId = 'klms') {}
+
+  forSite(site: SiteId): SessionStore {
+    return new SessionStore(this.file, site);
   }
 
-  save(session: SessionFile): void {
+  private read(): FileV2 {
+    if (!fs.existsSync(this.file)) return { version: 2, sites: {} };
+    return parseSessionFile(fs.readFileSync(this.file, 'utf8'));
+  }
+
+  private write(data: FileV2): void {
     ensureDir(path.dirname(this.file));
     const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(session, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     fs.renameSync(tmp, this.file);
   }
 
+  load(): SessionFile | null {
+    return this.read().sites[this.site] ?? null;
+  }
+
+  save(session: SessionFile): void {
+    const data = this.read();
+    data.sites[this.site] = session;
+    this.write(data);
+  }
+
   clear(): void {
-    fs.rmSync(this.file, { force: true });
+    const data = this.read();
+    delete data.sites[this.site];
+    this.write(data);
   }
 }
 
