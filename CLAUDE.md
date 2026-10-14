@@ -9,8 +9,9 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - S2 완료 (2026-10-14): `sync`(과목 구성·과제·공지), `assignments`, `notices`, `videos`, `doctor`. 사용자 대조 완료(과제 3개 일치)
 - S3 완료 (2026-10-14): 파일 다운로드(105개), 드라이브 폴더, 요약 md/PDF, 과제 `설명.md`, `files`. 휴대폰 확인 완료
 - S4 완료 (2026-10-14): 구글 "KLMS" 캘린더 마감 15개 + 시험 8건(수동). OAuth는 테스트 상태라 7일마다 `kaist cal login` 필요. 휴대폰 확인 완료
-- **S5 진행 중**: 에이전트 연결과 다듬기
-- 다음: S6 학사 일정 추출(`docs/school-events-design.md`) → Dooray 메일 → Portal
+- S5 완료 (2026-10-14): 에이전트용 출력 다듬기(`changes`, 과제 경로·남은 시간, 신선도), 수강 취소 과목 처리. 대화 시나리오 4개는 사용자가 생략하고 넘어감(실사용 중 확인)
+- S6 완료 (2026-10-14): 학사 일정 추출 `kaist events` (후보·검사·A/B등급·undo), 기존 시험 8건 이전, 첫 처리로 휴강·퀴즈·발표·온라인 13건 추가(A 1건 자동, B 12건 확인), `kaist summary`
+- 다음: Dooray 메일 → Portal
 - 사용자 할 일:
   - OneDrive 웹 휴지통에서 옛 `local/` 폴더를 영구 삭제 (쿠키·토큰 사본 포함)
 
@@ -21,7 +22,14 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - **조회는 로컬 데이터로 먼저 답한다.** 모든 조회 JSON에 `lastSyncKst`와 `lastSyncMinutesAgo`가 있다. 데이터가 얼마나 오래됐는지 함께 알린다.
   - "새로 올라온 거": 먼저 `kaist changes --json`(마지막 sync의 변경, `--runs 3`으로 여러 회)을 본다. 오래됐으면 sync를 제안한다.
   - 마감·제출 상태: `kaist assignments --json` (`--due 7d`, `--all`, `--course <코드|이름>`). 각 과제에 `hoursLeft`, `submission`(submitted/noattempt 등), `descriptionFile`(설명.md), `attachments[].localPath`가 있다.
-  - 시험 일정: 지금은 `kaist cal list --json`의 `[과목] 중간고사/기말고사` 일정(직접 넣은 것, "(계획서 기준)"이면 바뀌었을 수 있음). S6 이후 `kaist events`
+  - 시험·휴강·온라인·보강: `kaist events list --json` (기본 오늘 이후). "(계획서 기준)"은 학기 초 강의계획서라 바뀌었을 수 있다.
+- **sync 뒤 학사 일정 후보 처리** (`docs/school-events-design.md`, sync 결과의 `candidates.newCandidates > 0`일 때):
+  1. `kaist events candidates --json`을 읽고 후보마다 판단한다. 이미 등록된 일정과 같거나, 지났거나, 일정이 아니면 `kaist events dismiss <id...> --reason "..."`로 닫는다.
+  2. 일정이면 `kaist events add --course <코드> --kind exam|no_class|online|makeup --date YYYY-MM-DD [--start HH:MM --end HH:MM --location ... --title 중간고사] --from-candidate <id> --quote "<snippet에서 그대로 복사>" --dry-run`으로 등급을 본다. 연도는 학기 범위로, 상대 표현("다음 주")은 글 게시일 기준으로 푼다.
+  3. **A등급은 묻지 않고 등록한다**(사용자 결정: 처음부터 자동). 등록한 뒤 "자동 등록 N건 (되돌리기: `kaist events undo --last`)"를 알린다.
+  4. **B등급(종료 코드 4, NEEDS_CONFIRMATION)은 사용자에게 보여주고 확인받은 뒤** `--confirmed`를 붙여 등록한다. 변경·취소는 `kaist events update <id> ... --confirmed`(취소는 `--cancel`)를 쓴다.
+  5. 인용(`--quote`)은 원문에 있는 문장만 쓴다. 검사가 원문 대조, 요일, 학기 범위를 확인한다. 실패하면 값을 고치거나 사용자에게 묻는다.
+  - 규칙을 고친 뒤에는 `kaist events rescan`으로 처리하지 않은 후보만 다시 뽑는다(로컬). 드라이브 요약만 다시 만들 때는 `kaist summary`를 쓴다.
   - 공지: `kaist notices --since 3d --json` (본문이 필요하면 `--body`)
   - 강의자료: `kaist files --json` (`--new`는 마지막 sync에서 받은 것), 영상 링크: `kaist videos --json`
   - 캘린더: `kaist cal list --json`
@@ -54,7 +62,7 @@ src/               CLI 본체 (S1부터)
 - 빌드 `npm run build` (dist/), 전역 명령 연결 `npm link` → `kaist`
 - 개발 실행 `npm run dev -- <명령>`, 테스트 `npm test` (tests/, 합성 데이터만)
 - 코드 배치: `src/sso/`(사이트 무관 로그인 창), `src/klms/`(site.ts 상수·판별, http.ts 공통 계층, ajax.ts, session.ts, courses.ts), `src/store/`(로컬 데이터)
-- 종료 코드: 0 성공, 1 오류, 2 세션 만료(`--no-login`), 3 로그인 취소
+- 종료 코드: 0 성공, 1 오류, 2 세션 만료(`--no-login`), 3 로그인 취소, 4 사용자 확인 필요(B등급, 삭제·되돌리기 미리보기)
 - 명령 (모두 `--json` 지원):
   - `kaist login [--force]`, `kaist status [--check]`, `kaist courses [--refresh] [--no-login]`
   - `kaist sync [--course X] [--no-login]`: KLMS 접속. 과목 페이지, updates_since, 캘린더(사이트 전체 월별), 과제 페이지(새것·변경·마감 임박만), 게시판 새 글

@@ -19,14 +19,14 @@ export function parseKstOrThrow(text: string, what: string): number {
   return t;
 }
 
-export interface EventView { id: string; summary: string; startKst: string; endKst: string; kind: 'deadline' | 'manual'; cmid: string | null; link: string | null; description: string }
+export interface EventView { id: string; summary: string; startKst: string; endKst: string; kind: 'deadline' | 'school' | 'manual'; cmid: string | null; link: string | null; description: string }
 
 const toKst = (iso: string) => new Date(Date.parse(iso) + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ');
 /** 종일 일정은 "YYYY-MM-DD 종일" */
 const when = (t: { dateTime?: string; date?: string }) => (t.dateTime ? toKst(t.dateTime) : `${t.date} 종일`);
 const view = (e: GEvent): EventView => ({
   id: e.id!, summary: e.summary, startKst: when(e.start), endKst: when(e.end),
-  kind: e.extendedProperties?.private?.kaistCmid ? 'deadline' : 'manual', cmid: e.extendedProperties?.private?.kaistCmid ?? null,
+  kind: e.extendedProperties?.private?.kaistCmid ? 'deadline' : e.extendedProperties?.private?.kaistEvent ? 'school' : 'manual', cmid: e.extendedProperties?.private?.kaistCmid ?? null,
   link: e.htmlLink ?? null, description: e.description ?? '',
 });
 

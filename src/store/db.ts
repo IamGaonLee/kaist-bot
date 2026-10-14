@@ -55,6 +55,28 @@ create table if not exists files (
 );
 create index if not exists files_course on files(course_id);
 create index if not exists changes_run on changes(run_id);
+-- S6 학사 일정 (docs/school-events-design.md)
+create table if not exists source_text (
+  key text primary key, extractor text not null, text text, text_hash text, no_text integer not null default 0,
+  version text, extracted_at text not null
+);
+create table if not exists event_candidates (
+  id integer primary key autoincrement, source_type text not null, source_id text not null, course_id integer,
+  snippet text not null, context text not null, snippet_hash text not null unique, kind_hint text, keywords text, date_hints text,
+  source_title text, source_url text, source_posted_at integer,
+  first_seen_sync_id integer, status text not null default 'new', status_reason text, linked_event_id integer
+);
+create table if not exists school_events (
+  id integer primary key autoincrement, course_id integer not null, kind text not null, title text not null,
+  date text not null, start_at integer, end_at integer, all_day integer not null, time_known integer not null,
+  location text, source_type text not null, source_id text, source_url text, quote text,
+  confidence text not null, created_by_sync_id integer, gcal_event_id text, status text not null default 'active',
+  created_at text not null, updated_at text not null
+);
+create unique index if not exists school_events_key on school_events(course_id, kind, date);
+create table if not exists school_event_history (
+  event_id integer not null, changed_at text not null, field text not null, old text, new text, source_id text, by_sync_id integer
+);
 create index if not exists notices_course on notices(course_id, posted_at);
 create index if not exists tasks_due on tasks(due);
 `;

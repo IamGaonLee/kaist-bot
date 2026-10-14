@@ -7,6 +7,7 @@ import { collectCandidates, executeDownloads, planFiles, recordPlan } from '../f
 import { writeMarkdown } from '../files/markdown.js';
 import { renderPdfs } from '../files/pdf.js';
 import { findDropped, handleDropped } from '../files/dropped.js';
+import { scanCandidates, type ScanResult } from '../events/candidates.js';
 import { pushDeadlines, type PushResult } from '../cal/push.js';
 import { hasGoogleToken } from '../google/oauth.js';
 import { parseAssignPage } from '../klms/adapters/assign-page.js';
@@ -59,6 +60,7 @@ export interface SyncResult {
   runId: number;
   files?: FileStage;
   calendar?: PushResult;
+  candidates?: ScanResult;
   startedAt: string;
   finishedAt: string;
   status: 'ok' | 'partial' | 'aborted';
@@ -153,6 +155,13 @@ async function runSyncLocked(opts: SyncOptions): Promise<SyncResult> {
     // 파일 다운로드와 드라이브 요약 (S3)
     const okIds = result.courses.filter(c => c.ok).map(c => c.id);
     if (opts.files !== false && okIds.length) result.files = await fileStage(session, semester.label, okIds, runId, opts, result);
+
+    // 학사 일정 후보 (S6): 공지·주차 안내·과제 설명·파일 본문에서. 해석·등록은 에이전트가 `kaist events`로
+    if (okIds.length) {
+      log('학사 일정 후보 찾는 중...');
+      try { result.candidates = await scanCandidates(runId, semester.year, log); }
+      catch (e) { result.warnings.push(`학사 일정 후보 추출 실패: ${e instanceof Error ? e.message : String(e)}`); }
+    }
 
     // 구글 캘린더 반영 (S4). 실패해도 수집 결과는 유지하고 경고로 알린다
     if (opts.calendar !== false) {

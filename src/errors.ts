@@ -41,4 +41,4 @@ export class NotAvailableError extends KaistError {
 }
 
 export const exitCodeOf = (e: unknown): number =>
-  e instanceof SessionExpiredError ? 2 : e instanceof LoginCancelledError ? 3 : 1;
+  e instanceof SessionExpiredError ? 2 : e instanceof LoginCancelledError ? 3 : e instanceof KaistError && e.code === 'NEEDS_CONFIRMATION' ? 4 : 1;

@@ -14,6 +14,11 @@ import { formatKst, nowSec, parseDuration } from './util/time.js';
 import { ensureCalendar, pushDeadlines } from './cal/push.js';
 import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, parseReminders, updateEvent } from './cal/manual.js';
 import { googleLogin } from './google/oauth.js';
+import { loadSettings } from './config.js';
+import { writeMarkdown } from './files/markdown.js';
+import { renderPdfs } from './files/pdf.js';
+import { listCandidates, rescanCandidates, setCandidateStatus, type Kind } from './events/candidates.js';
+import { addSchoolEvent, importManualExams, lastSyncRun, listSchoolEvents, undoAuto, updateSchoolEvent } from './events/register.js';
 
 const program = new Command();
 program.name('kaist').description('KAIST KLMS 수집 CLI (읽기 전용)');
@@ -32,7 +37,7 @@ function run<A extends unknown[]>(fn: (...args: A) => Promise<void>) {
       await fn(...args);
     } catch (e) {
       const err = e instanceof KaistError ? e : new KaistError('INTERNAL', e instanceof Error ? e.message : String(e));
-      if (opts?.json) console.log(JSON.stringify({ ok: false, error: { code: err.code, message: err.message } }, null, 2));
+      if (opts?.json) console.log(JSON.stringify({ ok: false, error: { code: err.code, message: err.message, ...(err.detail ? { detail: err.detail } : {}) } }, null, 2));
       else console.error(`오류 [${err.code}] ${err.message}`);
       process.exitCode = exitCodeOf(e);
     }
@@ -177,6 +182,10 @@ function syncText(r: SyncResult): string {
     for (const s of [...c.created.map(x => `+ ${x}`), ...c.updated.map(x => `~ ${x}`)].slice(0, 20)) lines.push(`  ${s}`);
     for (const s of c.skippedReview) lines.push(`  ⚠ 마감 확인 필요라 등록 안 함: ${s}`);
   }
+  if (r.candidates) {
+    const c = r.candidates;
+    lines.push(`학사 일정 후보: 새로 ${c.newCandidates}건${c.pastSkipped ? ` (지난 학기 자료 ${c.pastSkipped}건 제외)` : ''}${c.newCandidates ? ' → kaist events candidates' : ''}`);
+  }
   if (Object.keys(r.unprocessed).length) lines.push(`처리하지 못한 활동 유형: ${Object.entries(r.unprocessed).map(([k, v]) => `${k} ${v}개`).join(', ')}`);
   for (const w of r.warnings) lines.push(`경고: ${w}`);
   return lines.join('\n');
@@ -303,7 +312,7 @@ cal.command('list')
     const to = opts.to ? parseKstOrThrow(opts.to, '--to') + (opts.to.length === 10 ? 86400 : 0) : from + 14 * 86400;
     const events = await listEvents(from, to);
     output(opts.json, { events }, d => [`KLMS 캘린더 일정 ${d.events.length}개`,
-      ...d.events.map(e => `  ${e.startKst.endsWith('종일') ? e.startKst.padEnd(16) : `${e.startKst}~${e.endKst.slice(11)}`}  ${e.summary}${e.kind === 'manual' ? '  (직접 추가)' : ''}  [id ${e.id}]`)].join('\n'));
+      ...d.events.map(e => `  ${e.startKst.endsWith('종일') ? e.startKst.padEnd(16) : `${e.startKst}~${e.endKst.slice(11)}`}  ${e.summary}${e.kind === 'manual' ? '  (직접 추가)' : e.kind === 'school' ? '  (학사 일정)' : ''}  [id ${e.id}]`)].join('\n'));
   }));
 
 cal.command('add')
@@ -358,6 +367,151 @@ cal.command('delete')
     }
     await deleteEvent(id);
     output(opts.json, { deleted: true, event: e }, d => `삭제했습니다: ${d.event.summary}`);
+  }));
+
+const events = program.command('events').description('학사 일정(시험·휴강·온라인·보강): 후보 확인과 등록 (docs/school-events-design.md)');
+const KINDS = ['exam', 'no_class', 'online', 'makeup'];
+const kindOf = (k: string): Kind => {
+  if (!KINDS.includes(k)) throw new KaistError('BAD_ARGS', `--kind는 ${KINDS.join(' | ')} 중 하나여야 합니다: "${k}"`);
+  return k as Kind;
+};
+
+events.command('candidates')
+  .description('sync가 찾은 일정 후보 (기본: 아직 처리 안 한 new만)')
+  .option('--all', '처리한 것·지난 학기 자료까지 전부')
+  .option('--course <과목>', '특정 과목만')
+  .option('--kind <종류>', KINDS.join(' | '))
+  .option('--limit <n>', '최대 개수', '50')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { all?: boolean; course?: string; kind?: string; limit: string; json?: boolean }) => {
+    requireSynced();
+    const list = listCandidates({ status: opts.all ? undefined : ['new'], course: courseIds(opts.course), kind: opts.kind, limit: Number(opts.limit) });
+    output(opts.json, { ...syncInfo(), candidates: list }, d => [`일정 후보 ${d.candidates.length}개`,
+      ...d.candidates.map(c => `  #${c.id} [${c.kindHint}] ${c.course} ${c.sourceTitle ?? ''}${c.sourcePostedKst ? ` (${c.sourcePostedKst})` : ''}${opts.all ? ` <${c.status}>` : ''}\n      "${c.snippet}"`)].join('\n'));
+  }));
+
+events.command('add')
+  .description('후보를 해석해 학사 일정으로 등록 (검사 통과 필수, B등급은 --confirmed 필요)')
+  .requiredOption('--course <과목>', '과목 코드·이름')
+  .requiredOption('--kind <종류>', KINDS.join(' | '))
+  .requiredOption('--date <날짜>', 'YYYY-MM-DD (KST)')
+  .option('--start <시각>', 'HH:MM')
+  .option('--end <시각>', 'HH:MM')
+  .option('--location <장소>')
+  .option('--title <이름>', '시험 이름 (예: 중간고사, 기말고사, 퀴즈 3)')
+  .option('--from-candidate <id>', '근거 후보 id')
+  .option('--quote <원문>', '후보 원문에서 그대로 복사한 근거 문장')
+  .option('--manual', '후보 없이 직접 입력 (항상 확인 필요)')
+  .option('--confirmed', '사용자가 확인함')
+  .option('--dry-run', '검사와 등급만 보고 등록하지 않음')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { course: string; kind: string; date: string; start?: string; end?: string; location?: string; title?: string; fromCandidate?: string; quote?: string; manual?: boolean; confirmed?: boolean; dryRun?: boolean; json?: boolean }) => {
+    requireSynced();
+    const r = await addSchoolEvent({
+      course: o.course, kind: kindOf(o.kind), date: o.date, start: o.start, end: o.end, location: o.location, label: o.title,
+      fromCandidate: o.fromCandidate ? Number(o.fromCandidate) : undefined, quote: o.quote, manual: o.manual, confirmed: o.confirmed, dryRun: o.dryRun,
+    });
+    output(o.json, r, d => d.dryRun
+      ? `검사 통과. 등급 ${d.verdict.grade}${d.verdict.needsConfirmReasons.length ? ` (확인 필요: ${d.verdict.needsConfirmReasons.join(', ')})` : ' (확인 없이 등록 가능)'}`
+      : `등록했습니다 (${d.confidence === 'auto' ? '자동' : '확인됨'}): ${d.event!.date} ${d.event!.title} [id ${d.event!.id}]`);
+  }));
+
+events.command('update')
+  .description('학사 일정 변경·취소 (항상 --confirmed 필요, 이력 기록)')
+  .argument('<id>', '학사 일정 id (events list)')
+  .option('--date <날짜>')
+  .option('--start <시각>')
+  .option('--end <시각>')
+  .option('--location <장소>')
+  .option('--title <이름>')
+  .option('--cancel', '취소됨으로 표시 (일정은 지우지 않고 [취소])')
+  .option('--from-candidate <id>')
+  .option('--quote <원문>')
+  .option('--confirmed', '사용자가 확인함')
+  .option('--json', 'JSON 출력')
+  .action(run(async (id: string, o: { date?: string; start?: string; end?: string; location?: string; title?: string; cancel?: boolean; fromCandidate?: string; quote?: string; confirmed?: boolean; json?: boolean }) => {
+    const e = await updateSchoolEvent(Number(id), {
+      date: o.date, start: o.start, end: o.end, location: o.location, label: o.title, cancel: o.cancel,
+      fromCandidate: o.fromCandidate ? Number(o.fromCandidate) : undefined, quote: o.quote, confirmed: o.confirmed,
+    });
+    output(o.json, { event: e }, d => `수정했습니다: ${d.event.date} [id ${d.event.id}]${d.event.status === 'cancelled' ? ' (취소됨)' : ''}`);
+  }));
+
+events.command('dismiss')
+  .description('일정이 아닌 후보를 닫기 (원문이 바뀌지 않는 한 다시 나오지 않음)')
+  .argument('<ids...>', '후보 id들')
+  .option('--reason <이유>', '닫는 이유', '일정 아님')
+  .option('--json', 'JSON 출력')
+  .action(run(async (ids: string[], o: { reason: string; json?: boolean }) => {
+    for (const id of ids) setCandidateStatus(Number(id), 'dismissed', o.reason);
+    output(o.json, { dismissed: ids.map(Number) }, d => `후보 ${d.dismissed.length}개를 닫았습니다.`);
+  }));
+
+events.command('list')
+  .description('등록된 학사 일정 (기본: 오늘 이후)')
+  .option('--from <날짜>', 'YYYY-MM-DD')
+  .option('--to <날짜>', 'YYYY-MM-DD')
+  .option('--auto', '자동 등록분만')
+  .option('--sync <id>', '특정 sync 회차에 등록된 것만')
+  .option('--course <과목>')
+  .option('--cancelled', '취소된 일정 포함')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { from?: string; to?: string; auto?: boolean; sync?: string; course?: string; cancelled?: boolean; json?: boolean }) => {
+    const list = listSchoolEvents({
+      from: o.from ?? formatKst(nowSec()).slice(0, 10), to: o.to, auto: o.auto, syncId: o.sync ? Number(o.sync) : undefined,
+      course: courseIds(o.course), includeCancelled: o.cancelled,
+    });
+    output(o.json, { ...syncInfo(), events: list }, d => [`학사 일정 ${d.events.length}개`,
+      ...d.events.map(e => `  #${e.id} ${e.date} ${e.startKst ? `${e.startKst.slice(11)}~${e.endKst?.slice(11) ?? ''}` : '종일'.padEnd(11)} [${e.courseName}] ${e.title}${e.location ? ` @${e.location}` : ''} (${e.confidence === 'auto' ? '자동' : '확인됨'}${e.status === 'cancelled' ? ', 취소' : ''})`)].join('\n'));
+  }));
+
+events.command('undo')
+  .description('자동 등록분 되돌리기 (--yes 없으면 대상만 보여줌)')
+  .option('--last', '가장 최근 자동 등록 회차 (기본)')
+  .option('--sync <id>', '특정 sync 회차')
+  .option('--yes', '확인했으니 삭제')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { last?: boolean; sync?: string; yes?: boolean; json?: boolean }) => {
+    const r = await undoAuto(o.sync ? Number(o.sync) : 'last', !!o.yes);
+    output(o.json, r, d => d.targets.length === 0 ? '되돌릴 자동 등록 일정이 없습니다.' : [
+      `${d.deleted ? '삭제했습니다' : '삭제 대상'} (sync ${d.syncId}): ${d.targets.length}개`,
+      ...d.targets.map(t => `  ${t.date} [${t.courseName}] ${t.title}`),
+      ...(d.deleted ? [] : ['삭제하려면 --yes를 붙여 다시 실행하세요.']),
+    ].join('\n'));
+    if (!o.yes && r.targets.length) process.exitCode = 4;
+  }));
+
+events.command('rescan')
+  .description('후보 규칙을 바꾼 뒤 처리 안 한 후보를 다시 뽑기 (로컬 데이터만, KLMS 접속 없음)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { json?: boolean }) => {
+    requireSynced();
+    const sem = JSON.parse(getMeta('semester')!) as { year: number };
+    const r = await rescanCandidates(lastSyncRun() ?? 0, sem.year, status);
+    output(o.json, r, d => `후보 다시 뽑기: 지움 ${d.removed}, 새로 ${d.newCandidates}건 (지난 학기 자료 ${d.pastSkipped}건 제외)`);
+  }));
+
+events.command('import-calendar')
+  .description('S6 이전에 cal add로 직접 넣은 시험 일정을 학사 일정으로 가져오기 (한 번)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { json?: boolean }) => {
+    const r = await importManualExams();
+    output(o.json, r, d => [`가져옴 ${d.imported.length}개, 건너뜀 ${d.skipped.length}개`, ...d.imported.map(x => `  + ${x}`)].join('\n'));
+  }));
+
+program.command('summary')
+  .description('드라이브 요약(_요약·_과목정보 md/PDF)을 로컬 데이터로 다시 만들기 (KLMS 접속 없음)')
+  .option('--no-pdf', 'PDF는 만들지 않음')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { pdf: boolean; json?: boolean }) => {
+    requireSynced();
+    const cache = loadCourses();
+    if (!cache) throw new KaistError('NO_LOCAL_DATA', '로컬 과목 목록이 없습니다.');
+    const { driveRoot } = loadSettings();
+    const md = writeMarkdown(driveRoot, cache.semester.label, cache.courses.map(c => c.id), getMeta('last_sync_at')!);
+    const pdf = o.pdf ? await renderPdfs(md.filter(f => /_(요약|과목정보)\.md$/.test(f))) : { written: [], failed: [] };
+    output(o.json, { markdown: md.length, pdf: pdf.written.length, failed: pdf.failed }, d =>
+      `요약을 다시 만들었습니다: md ${d.markdown}개, PDF ${d.pdf}개${d.failed.length ? `, PDF 실패 ${d.failed.length}개` : ''} → ${driveRoot}`);
   }));
 
 program.command('doctor')

@@ -10,8 +10,6 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/turndown": "^5.0.6",
-    "jszip": "^3.10.2",
-    "pdfjs-dist": "^4.10.38",
     "playwright": "^1.64.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
@@ -20,7 +18,9 @@
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
     "marked": "^15.0.12",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "pdfjs-dist": "^4.10.38",
+    "jszip": "^3.10.2"
   },
   "bin": {
     "kaist": "dist/cli.js"

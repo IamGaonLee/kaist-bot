@@ -135,6 +135,23 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
     for (const t of upcoming) S.push(`| ${formatKst(t.due!)} | ${cell(t.code)} | ${cell(t.name)}${t.needs_review ? ' ⚠' : ''} | ${t.modname === 'assign' ? submissionLabel(t.submission_code, t.submission_text) : '퀴즈'} |`);
     S.push('');
   }
+  // 학사 일정 (S6): 시험·휴강·온라인·보강, 30일
+  const today = formatKst(now).slice(0, 10);
+  const until = formatKst(now + 30 * 86400).slice(0, 10);
+  const sev = db.prepare(`select e.*, c.code, c.name cname from school_events e join courses c on c.id = e.course_id
+    where c.active = 1 and e.status = 'active' and e.date >= ? and e.date <= ? order by e.date, e.start_at`).all(today, until) as Record<string, any>[];
+  S.push('## 다가오는 시험·휴강 등 학사 일정 (30일)', '');
+  if (sev.length === 0) S.push('없음', '');
+  else {
+    S.push('| 날짜 | 시간 | 과목 | 일정 | 장소 | 근거 |', '|---|---|---|---|---|---|');
+    const KIND: Record<string, string> = { exam: '', no_class: '휴강', online: '온라인 수업', makeup: '보강' };
+    for (const e of sev) {
+      const time = e.start_at ? `${formatKst(e.start_at).slice(11)}${e.end_at ? `~${formatKst(e.end_at).slice(11)}` : ''}` : '미정/종일';
+      const basis = e.source_type === 'file' ? '계획서 기준' : e.confidence === 'auto' ? '공지(자동)' : '확인됨';
+      S.push(`| ${e.date} | ${time} | ${cell(e.cname)} | ${cell(e.kind === 'exam' ? e.title : KIND[e.kind] ?? e.kind)} | ${cell(e.location ?? '')} | ${basis} |`);
+    }
+    S.push('');
+  }
   const review = all.filter(t => t.needs_review);
   if (review.length) {
     S.push('## ⚠ 마감 확인 필요 (KLMS에서 직접 확인)', '');
