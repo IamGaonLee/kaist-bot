@@ -46,10 +46,17 @@ function readJson<T>(file: string): T | null {
 }
 function writeJson(file: string, v: unknown): void { ensureDir(paths.home); fs.writeFileSync(file, JSON.stringify(v, null, 2)); }
 
+/** host id는 문서 예시대로 URN 형식(urn:uuid:…). 맨 UUID는 authorize에서 invalid_authorize_request(param ext_agent_host_id)로 거부됐다(2026-10-16 실측) */
+export const toHostId = (v: string): string => (/^urn:uuid:/i.test(v) ? v : `urn:uuid:${v}`);
+
 function loadClient(): ClientRecord {
   const c = readJson<ClientRecord>(clientFile());
-  if (c?.host_id) return c;
-  const fresh = { host_id: crypto.randomUUID() };
+  if (c?.host_id) {
+    const fixed = toHostId(c.host_id);
+    if (fixed !== c.host_id) { c.host_id = fixed; writeJson(clientFile(), c); }
+    return c;
+  }
+  const fresh = { host_id: toHostId(crypto.randomUUID()) };
   writeJson(clientFile(), fresh);
   return fresh;
 }
