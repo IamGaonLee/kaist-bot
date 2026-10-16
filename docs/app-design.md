@@ -71,7 +71,12 @@
   - 구현: 포트에 `prepare`(매 대기 회 화면 넘김)/`captureId` 훅, 드라이버에 자동 입력·dialog 감시·`KAIST_LOGIN_DEBUG`, `sso/account.ts`(아이디 저장, 기본 꺼짐), `loginAll({fillId, saveId})`, 모든 단계에 `advanceLogin`.
   - 비고: portal-design §7 "로그인 창에서 CLI는 이동만, 폼 조작·클릭 안 함"을 완화(아이디·포털·기기 등록·KLMS 버튼까지 프로그램이 누름). 비밀번호·폰 승인은 그대로 사용자. 병합 때 CLAUDE.md·portal-design 반영.
   - **창 숨김 + 앱 화면 (2026-10-16 사용자 요청, 실측):** 자동 넘김이 되므로 브라우저를 숨기고(CLI headless, Electron은 `show:false`) 사용자에겐 ① 폰 승인 요청+인증 번호 ② 로그인 중 ③ 완료/실패만 보인다. 2단계 인증 번호는 `.auth_number`에서 뽑아 `describe`로 올린다(두 번 나오면 중복 제거→2자리). 실측: `kaist login`이 창 없이 폰 승인만으로 4개 사이트 로그인. `--show-browser`로 창 표시(아이디 미저장 시 자동).
-- **C. Electron 껍데기:** `app/`(main·workers·preload·renderer), 트레이, 단일 인스턴스, 앱 안 로그인 창, `printToPDF`, 자동 sync 타이머+resume, Windows 알림. 코어는 어댑터로 재사용. 완료 기준: 앱 실행 → 앱 안 창 로그인(아이디만) → sync → 드라이브 저장 → 트레이·알림.
+- **C. Electron 껍데기 — 완료 (2026-10-16):**
+  - C1 트레이 앱 껍데기(창·트레이·단일 인스턴스). preload는 CJS여야 함(ESM이면 "Cannot use import" → `.cjs`). main은 ESM 가능(Electron 44).
+  - C2 앱 안 로그인: `app/electron-login.ts` 숨긴 BrowserWindow(메모리 partition)에서 로그인. `executeJavaScript`로 포트 evaluate 구현(함수 직렬화), `login-preload.cjs`가 alert 가로채 실패 감지, `session.cookies`로 쿠키. 렌더러 세 화면(폰 승인·번호/로그인 중/완료). 실측: 창 없이 폰 승인만으로 4개 사이트 로그인.
+  - C3 앱 동기화: sync IPC(runSync), 드라이브 저장, PDF는 `electron-pdf.ts` printToPDF(실측 `_요약.pdf` 재생성). 트레이 "지금 동기화". CSS·md→HTML은 `src/files/pdf-html.ts`로 공유.
+  - **미해결:** Windows 토스트 알림이 포장 안 된 개발 상태에선 안 뜸(AUMID에 연결된 시작 메뉴 바로가기 필요). 코드(`Notification`)는 맞고, 설치 프로그램(F단계)이 바로가기를 만들면 뜬다. F에서 확인.
+  - 구조: `tsconfig.electron.json`(src+app→dist-electron), `build:app`/`app` 스크립트. Playwright 미로드(앱은 Electron 어댑터만).
 - **D. 설정 마법사:** 첫 실행 — 계정, 구글 승인(캘린더 기본·Gmail 선택), 드라이브 폴더 선택, 모델 다운로드. 완료 기준: 새 설치에서 마법사만으로 동작까지.
 - **E. 로컬 LLM:** node-llama-cpp utilityProcess, 하드웨어 감지·모델 선택·다운로드, JSON 스키마로 후보의 인용·종류·날짜 원문 추출, 대화창(로컬 파일 근거), 자기 키 공급자 추상화. 완료 기준: S6 후보 47건 오프라인 추출에서 잘못 자동 등록된 A등급 0건, 대화창이 로컬 파일로 답함.
 - **F. 패키징·배포:** NSIS 설치 파일, 첫 실행 모델 다운로드, 둘째 계정 Gmail 미인증 시험, 서명 결정, 지인 1명 설치. 완료 기준: 지인이 설치해 사용.
