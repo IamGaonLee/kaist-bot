@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAISTBOT 사용 설명서</title>
+<style>
+  :root{--bg:#f7f8fa;--fg:#17181b;--sub:#5c636e;--accent:#1a56b0;--card:#fff;--line:#e5e8ec}
+  @media(prefers-color-scheme:dark){:root{--bg:#15171b;--fg:#e9ebee;--sub:#9aa1ac;--accent:#6ea8ff;--card:#1e2126;--line:#2d313a}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Pretendard','Malgun Gothic','Apple SD Gothic Neo',sans-serif;background:var(--bg);color:var(--fg);line-height:1.7}
+  .wrap{max-width:760px;margin:0 auto;padding:0 20px 60px}
+  header{padding:40px 0 16px}
+  a.back{color:var(--accent);text-decoration:none;font-size:14px}
+  h1{font-size:28px;margin:12px 0 4px}
+  h2{font-size:20px;margin:34px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+  h3{font-size:16px;margin:18px 0 6px}
+  p,li{color:var(--fg)}
+  .sub{color:var(--sub)}
+  code{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:10px 0}
+  .warn{border-left:3px solid var(--accent)}
+  ul{padding-left:20px}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
+  td,th{border:1px solid var(--line);padding:6px 9px;text-align:left}
+  th{background:var(--card)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="back" href="index.html">← KAISTBOT</a>
+    <h1>사용 설명서</h1>
+    <p class="sub">설치부터 매일 쓰기까지.</p>
+  </header>
+
+  <h2>1. 설치</h2>
+  <ol>
+    <li><code>KAISTBOT-Setup.exe</code>를 내려받아 실행합니다.</li>
+    <li>서명이 없으면 Windows가 <b>"PC 보호"</b> 경고를 띄웁니다. <b>추가 정보 → 실행</b>을 누르세요. (오픈소스 개인 앱이라 서명을 붙이지 않았습니다.)</li>
+    <li>설치가 끝나면 앱이 트레이(작업표시줄 오른쪽)에 상주합니다.</li>
+  </ol>
+
+  <h2>2. 처음 설정</h2>
+  <p>앱을 처음 열면 설정 마법사가 뜹니다.</p>
+  <h3>① 학교 계정</h3>
+  <p>"로그인하고 아이디 저장"을 누르면 로그인 창이 뜹니다. <b>아이디를 한 번 입력</b>하고 폰으로 승인하세요. 아이디는 이 PC에만 저장되고, <b>비밀번호는 저장하지 않습니다.</b> 다음부터는 창 없이 폰 승인만 하면 됩니다.</p>
+  <h3>② 드라이브 폴더</h3>
+  <p>수집한 자료를 저장할 폴더를 고릅니다. 구글 드라이브(또는 원드라이브) 동기화 폴더 안을 추천합니다. 그래야 폰에서도 보입니다.</p>
+  <h3>③ 구글 연결</h3>
+  <p>"구글 승인"을 누르면 브라우저가 열립니다. 마감·시험을 올릴 캘린더 권한을 허용하세요. <b>"확인되지 않은 앱"</b> 경고가 나오면 <b>고급 → 이동</b>을 누릅니다. 학교 메일(Gmail) 가져오기는 체크박스로 선택합니다.</p>
+  <h3>④ AI 모델</h3>
+  <p>대화와 일정 추출에 쓸 모델을 고릅니다.</p>
+  <table>
+    <tr><th>모델</th><th>크기</th><th>추천</th></tr>
+    <tr><td>Qwen2.5 1.5B</td><td>~1GB</td><td>저사양 PC</td></tr>
+    <tr><td>Qwen2.5 3B (기본)</td><td>~2GB</td><td>RAM 16GB</td></tr>
+    <tr><td>Qwen2.5 7B</td><td>~4.7GB</td><td>GPU·넉넉한 RAM</td></tr>
+  </table>
+  <p>"모델 받기"를 누르면 내려받아 <b>오프라인</b>으로 돌아갑니다. 더 좋은 품질을 원하면 <b>외부 AI</b>를 골라 GPT·Claude·Gemini 프리셋을 누르고 자기 API 키를 넣으세요(이 경우 질문 내용이 해당 서비스로 전송됩니다).</p>
+
+  <h2>3. 매일 쓰기</h2>
+  <ul>
+    <li><b>지금 동기화</b> — 앱(또는 트레이 메뉴)에서 누르면 KLMS·포털·생활관을 수집하고 드라이브·캘린더를 갱신합니다. 세션이 살아 있으면 폰 승인 없이 끝납니다.</li>
+    <li><b>AI에게 묻기</b> — "이번 주 과제 뭐 있어?"처럼 물으면 모아둔 자료를 근거로 답합니다.</li>
+    <li><b>캘린더</b> — 마감·시험은 구글 "KLMS" 캘린더에 올라갑니다. 폰 캘린더 앱에서 바로 보세요.</li>
+    <li><b>드라이브</b> — 과목 폴더의 <code>_요약.pdf</code>, <code>_과목정보.pdf</code>, 과제 <code>설명.md</code>와 첨부를 봅니다.</li>
+  </ul>
+
+  <h2>4. 로그인 화면이 뜰 때</h2>
+  <p>세션은 시간이 지나면 만료됩니다. 그때는 앱이 로그인을 요청합니다. <b>폰 승인만</b> 하면 되고(아이디는 자동 입력), 인증 번호가 화면에 뜨면 폰에서 그 번호로 승인하세요. 비밀번호를 묻지 않습니다.</p>
+
+  <h2>5. 개인정보</h2>
+  <ul>
+    <li>읽기만 합니다 — 제출·글쓰기·설정 변경은 하지 않습니다.</li>
+    <li>학교 비밀번호는 저장·자동입력하지 않습니다. 2단계 인증은 그대로 유지합니다.</li>
+    <li>성적·생활관 호실은 이 PC에만 두고, 드라이브·요약·대화에 넣지 않습니다.</li>
+    <li>받은 자료는 개인 학습용입니다. 공유 기능은 없습니다.</li>
+  </ul>
+
+  <h2>자주 묻는 것</h2>
+  <div class="card"><b>PC를 꺼도 되나요?</b><br><span class="sub">끄면 그동안은 갱신이 안 됩니다. 켜져 있을 때 동기화합니다. 이미 받은 자료와 캘린더는 폰에서 계속 볼 수 있습니다.</span></div>
+  <div class="card"><b>비밀번호를 왜 안 받나요?</b><br><span class="sub">KAIST 정보보안지침이 자동 비밀번호 입력을 금지합니다. 그래서 아이디만 넣고 폰 승인으로 로그인합니다.</span></div>
+  <div class="card warn"><b>동기화가 안 돼요</b><br><span class="sub">세션 만료입니다. 앱에서 "다시 로그인"을 눌러 폰 승인을 해 주세요.</span></div>
+</div>
+</body>
+</html>
