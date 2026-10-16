@@ -180,6 +180,14 @@ ipcMain.handle('setup:state', () => ({
   driveRootExists: (() => { try { return fs.existsSync(path.dirname(loadSettings().driveRoot)); } catch { return false; } })(),
 }));
 
+// 구글 드라이브 데스크톱이 없을 때: 문서\KAIST를 자료 폴더로(폰에서는 안 보이지만 모든 기능 동작)
+ipcMain.handle('drive:useLocal', () => {
+  const root = path.join(app.getPath('documents'), 'KAIST');
+  try { fs.mkdirSync(root, { recursive: true }); } catch (e) { return { ok: false, error: { message: `폴더를 만들지 못했습니다: ${(e as Error).message}` } }; }
+  saveSettings({ driveRoot: root });
+  return { ok: true, driveRoot: root };
+});
+
 ipcMain.handle('drive:pick', async () => {
   const r = await dialog.showOpenDialog({ title: '드라이브(KAIST) 폴더 선택', properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return { ok: false };
@@ -190,41 +198,81 @@ ipcMain.handle('drive:pick', async () => {
 // AI 모델 선택 (설치 마법사 4단계)
 ipcMain.handle('ai:state', async () => {
   const { catalogWithState } = await import('../src/ai/models.js');
-  const { useExternal } = await import('../src/ai/provider.js');
+  const { resolveAiSource } = await import('../src/ai/provider.js');
+  const { chatGptState, USAGE_URL } = await import('../src/ai/chatgpt-auth.js');
   const s = loadSettings();
   const models = catalogWithState(s.aiModelUri);
-  const ext = useExternal(s);
+  const source = resolveAiSource(s);
   const cur = models.find(m => m.selected);
+  const cg = chatGptState();
+  const cgModel = s.aiChatgptModel ?? cg.models[0]?.slug ?? '';
+  const labels: Record<string, string> = {
+    key: `${s.aiModel ?? 'gpt-6-luna'} · 외부`,
+    chatgpt: `${cgModel || 'ChatGPT'} · ChatGPT 플랜`,
+    local: `${cur?.label ?? '로컬 모델'} · 로컬`,
+  };
   return {
-    models, hasApiKey: !!s.aiApiKey, usingApiKey: ext, apiBaseUrl: s.aiBaseUrl ?? '', apiModel: s.aiModel ?? '',
+    models, source, hasApiKey: !!s.aiApiKey, usingApiKey: source === 'key', apiBaseUrl: s.aiBaseUrl ?? '', apiModel: s.aiModel ?? '',
+    chatgpt: { loggedIn: cg.loggedIn, email: cg.email ?? '', models: cg.models, model: cgModel, usageUrl: USAGE_URL },
     effort: s.aiEffort ?? 'medium',
-    currentLabel: ext ? `${s.aiModel ?? 'gpt-6-luna'} · 외부` : `${cur?.label ?? '로컬 모델'} · 로컬`,
+    currentLabel: labels[source],
   };
 });
 
-// 마법사: 로컬 모델 선택(키는 지우지 않고 외부 사용만 끈다)
+// 마법사: 로컬 모델 선택(키·ChatGPT 로그인은 지우지 않고 선택만 바꾼다)
 ipcMain.handle('ai:setModel', async (_e, uri: string) => {
   const { resetAiProvider } = await import('../src/ai/provider.js');
-  saveSettings({ aiModelUri: uri, aiUseExternal: false });
+  saveSettings({ aiModelUri: uri, aiUseExternal: false, aiSource: 'local' });
   await resetAiProvider();
   return { ok: true };
 });
 
 ipcMain.handle('ai:setApiKey', async (_e, opts: { apiKey: string; baseUrl?: string; model?: string }) => {
   const { resetAiProvider } = await import('../src/ai/provider.js');
-  saveSettings({ aiApiKey: opts.apiKey || undefined, aiBaseUrl: opts.baseUrl || undefined, aiModel: opts.model || undefined, aiUseExternal: !!opts.apiKey });
+  saveSettings({ aiApiKey: opts.apiKey || undefined, aiBaseUrl: opts.baseUrl || undefined, aiModel: opts.model || undefined, aiUseExternal: !!opts.apiKey, aiSource: opts.apiKey ? 'key' : 'local' });
   await resetAiProvider();
   return { ok: true };
 });
 
-// 대화창 모델 선택기: 로컬 카탈로그 중 하나 또는 외부(키 있을 때)
-ipcMain.handle('ai:select', async (_e, sel: { uri?: string; external?: boolean }) => {
+// 대화창 모델 선택기: 로컬 카탈로그 중 하나 / 외부(키 있을 때) / ChatGPT 플랜(로그인돼 있을 때)
+ipcMain.handle('ai:select', async (_e, sel: { uri?: string; external?: boolean; chatgpt?: boolean; model?: string }) => {
   const { resetAiProvider } = await import('../src/ai/provider.js');
-  if (sel.external) { if (!loadSettings().aiApiKey) return { ok: false, error: { message: '외부 AI는 설정에서 API 키를 먼저 넣어야 합니다.' } }; saveSettings({ aiUseExternal: true }); }
-  else if (sel.uri) saveSettings({ aiModelUri: sel.uri, aiUseExternal: false });
+  const { hasChatGptToken } = await import('../src/ai/chatgpt-auth.js');
+  if (sel.chatgpt) {
+    if (!hasChatGptToken()) return { ok: false, error: { message: 'ChatGPT 플랜을 쓰려면 설정에서 "Continue with ChatGPT"로 먼저 로그인해야 합니다.' } };
+    saveSettings({ aiSource: 'chatgpt', ...(sel.model ? { aiChatgptModel: sel.model } : {}) });
+  } else if (sel.external) { if (!loadSettings().aiApiKey) return { ok: false, error: { message: '외부 AI는 설정에서 API 키를 먼저 넣어야 합니다.' } }; saveSettings({ aiUseExternal: true, aiSource: 'key' }); }
+  else if (sel.uri) saveSettings({ aiModelUri: sel.uri, aiUseExternal: false, aiSource: 'local' });
   await resetAiProvider();
   return { ok: true };
 });
+
+// Continue with ChatGPT: 브라우저에서 OpenAI 로그인·동의 → 토큰 저장 → 이 PC의 ChatGPT 플랜으로 모델 호출
+ipcMain.handle('chatgpt:login', async () => {
+  const sendStatus = (msg: string) => win?.webContents.send('status', msg);
+  try {
+    const { chatGptLogin } = await import('../src/ai/chatgpt-auth.js');
+    const { resetAiProvider } = await import('../src/ai/provider.js');
+    const r = await chatGptLogin(sendStatus, { openUrl: (u) => { shell.openExternal(u).catch(() => { /* 상태줄에 URL이 있음 */ }); } });
+    saveSettings({ aiSource: 'chatgpt', aiChatgptModel: loadSettings().aiChatgptModel ?? r.models[0]?.slug });
+    await resetAiProvider();
+    return { ok: true, email: r.email ?? '', models: r.models };
+  } catch (e) {
+    const err = e as { code?: string; message?: string };
+    return { ok: false, error: { code: err.code ?? 'ERROR', message: err.message ?? String(e) } };
+  }
+});
+
+ipcMain.handle('chatgpt:logout', async () => {
+  const { chatGptLogout } = await import('../src/ai/chatgpt-auth.js');
+  const { resetAiProvider } = await import('../src/ai/provider.js');
+  chatGptLogout();
+  if (loadSettings().aiSource === 'chatgpt') saveSettings({ aiSource: 'local' });
+  await resetAiProvider();
+  return { ok: true };
+});
+
+ipcMain.handle('chatgpt:usage', () => { shell.openExternal('https://chatgpt.com/settings/usage').catch(() => { /* 무시 */ }); return { ok: true }; });
 
 ipcMain.handle('ai:setEffort', (_e, effort: 'low' | 'medium' | 'high') => { saveSettings({ aiEffort: effort }); return { ok: true }; });
 

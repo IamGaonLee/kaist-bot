@@ -39,9 +39,14 @@ export interface Settings {
   aiUseExternal?: boolean;
   /** 답변 노력(길이·추론). 로컬은 답변 길이 상한, 외부 추론 모델은 reasoning_effort */
   aiEffort?: AiEffort;
+  /** 공급자 선택: 로컬 모델 / 자기 API 키 / ChatGPT 플랜(Continue with ChatGPT). 없으면 aiApiKey·aiUseExternal로 판단(구버전 호환) */
+  aiSource?: AiSource;
+  /** ChatGPT 플랜으로 쓸 모델 slug (/v1/models 목록 중). 없으면 목록의 첫 모델 */
+  aiChatgptModel?: string;
 }
 
 export type AiEffort = 'low' | 'medium' | 'high';
+export type AiSource = 'local' | 'key' | 'chatgpt';
 
 export function loadSettings(): Settings {
   const file = path.join(home, 'config.json');
@@ -50,7 +55,8 @@ export function loadSettings(): Settings {
     try { user = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) as Partial<Settings>; }
     catch { throw new Error(`설정 파일을 읽지 못했습니다: ${file}`); }
   }
-  return { driveRoot: process.env.KAIST_DRIVE_ROOT ?? user.driveRoot ?? 'G:\\내 드라이브\\KAIST' };
+  // driveRoot 외의 설정(AI 키·모델·노력·공급자 선택)도 그대로 넘긴다. v1.1.0까지는 driveRoot만 돌려줘 AI 설정이 무시되던 버그가 있었다.
+  return { ...user, driveRoot: process.env.KAIST_DRIVE_ROOT ?? user.driveRoot ?? 'G:\\내 드라이브\\KAIST' };
 }
 
 const configFile = () => path.join(home, 'config.json');

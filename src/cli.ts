@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { installPlaywrightPlatform } from './platform.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import { KaistError, exitCodeOf } from './errors.js';
 import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
@@ -20,7 +22,7 @@ import { ensureCalendar, pushDeadlines } from './cal/push.js';
 import { addEvent, deleteEvent, getEvent, listEvents, parseKstOrThrow, parseReminders, updateEvent } from './cal/manual.js';
 import { googleLogin, hasGmailScope } from './google/oauth.js';
 import { listMails, rematchMailCourses, showMail, syncMail } from './mail/sync.js';
-import { loadSettings } from './config.js';
+import { loadSettings, saveSettings } from './config.js';
 import { writeMarkdown } from './files/markdown.js';
 import { renderPdfs } from './files/pdf.js';
 import { listCandidates, rescanCandidates, scanCandidates, setCandidateStatus, type Kind } from './events/candidates.js';
@@ -636,6 +638,7 @@ program.command('summary')
     const cache = loadCourses();
     if (!cache) throw new KaistError('NO_LOCAL_DATA', '로컬 과목 목록이 없습니다.');
     const { driveRoot } = loadSettings();
+    if (!fs.existsSync(path.dirname(driveRoot))) throw new KaistError('DRIVE_MISSING', `자료 폴더의 상위 ${path.dirname(driveRoot)}가 없습니다. Google Drive가 실행 중인지, 또는 config.json의 driveRoot(구글 드라이브 없이도 PC 폴더면 됩니다)를 확인해 주세요.`);
     const md = writeMarkdown(driveRoot, cache.semester.label, cache.courses.map(c => c.id), getMeta('last_sync_at')!);
     const pdf = o.pdf ? await renderPdfs(md.filter(f => /_(요약|과목정보|학교메일)\.md$/.test(f))) : { written: [], failed: [] };
     output(o.json, { markdown: md.length, pdf: pdf.written.length, failed: pdf.failed }, d =>
@@ -725,8 +728,54 @@ program.command('suggest')
         ...d.suggestions.map(x => `  [${x.grade}] ${x.date}${x.start ? ' ' + x.start : ''} ${x.course} ${({ exam: '시험', no_class: '휴강', online: '온라인', makeup: '보강' } as Record<string, string>)[x.kind] ?? x.kind}  "${x.quote.slice(0, 40)}"${x.reasons.length ? `  (확인: ${x.reasons.join(', ')})` : ''}`)].join('\n'));
   }));
 
+const chatgpt = program.command('chatgpt').description('ChatGPT 계정 연결 (Continue with ChatGPT: 내 Plus/Pro 플랜으로 내장 AI 사용, API 키 불필요)');
+chatgpt.command('login')
+  .description('브라우저에서 ChatGPT 계정으로 로그인·동의 (비밀번호는 OpenAI 화면에서만 입력)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { json?: boolean }) => {
+    const { chatGptLogin } = await import('./ai/chatgpt-auth.js');
+    const { resetAiProvider } = await import('./ai/provider.js');
+    const r = await chatGptLogin(status);
+    const model = loadSettings().aiChatgptModel ?? r.models[0]?.slug;
+    saveSettings({ aiSource: 'chatgpt', aiChatgptModel: model });
+    await resetAiProvider();
+    output(o.json, { ok: true, email: r.email ?? null, model: model ?? null, models: r.models.map(m => m.slug) },
+      d => `ChatGPT 연결 완료${d.email ? ` (${d.email})` : ''}. 모델: ${d.model ?? '(목록 없음)'}${d.models.length > 1 ? `  (선택 가능: ${d.models.join(', ')})` : ''}\n이제 \`kaist ask\`가 ChatGPT 플랜으로 답합니다. 사용량 관리: https://chatgpt.com/settings/usage`);
+  }));
+chatgpt.command('logout')
+  .description('저장된 ChatGPT 토큰 삭제 (로컬 모델로 돌아감)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { json?: boolean }) => {
+    const { chatGptLogout } = await import('./ai/chatgpt-auth.js');
+    const { resetAiProvider } = await import('./ai/provider.js');
+    const removed = chatGptLogout();
+    if (loadSettings().aiSource === 'chatgpt') saveSettings({ aiSource: 'local' });
+    await resetAiProvider();
+    output(o.json, { ok: true, removed }, d => d.removed ? 'ChatGPT 연결을 해제했습니다. 로컬 모델을 씁니다.' : '연결된 ChatGPT 계정이 없습니다.');
+  }));
+chatgpt.command('status')
+  .description('ChatGPT 연결 상태와 선택된 모델')
+  .option('--model <slug>', '쓸 모델 바꾸기 (login 때 받은 목록 중)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (o: { model?: string; json?: boolean }) => {
+    const { chatGptState } = await import('./ai/chatgpt-auth.js');
+    const { resolveAiSource, resetAiProvider } = await import('./ai/provider.js');
+    const st = chatGptState();
+    if (o.model) {
+      if (!st.loggedIn) throw new KaistError('CHATGPT_NO_TOKEN', '먼저 `kaist chatgpt login`을 실행해 주세요.');
+      if (st.models.length && !st.models.some(m => m.slug === o.model)) throw new KaistError('AI_MODEL', `모델 목록에 없습니다: ${o.model}. 가능: ${st.models.map(m => m.slug).join(', ')}`);
+      saveSettings({ aiChatgptModel: o.model });
+      await resetAiProvider();
+    }
+    const s = loadSettings();
+    output(o.json, { loggedIn: st.loggedIn, email: st.email ?? null, model: s.aiChatgptModel ?? st.models[0]?.slug ?? null, models: st.models, active: resolveAiSource(s) === 'chatgpt' },
+      d => d.loggedIn
+        ? `ChatGPT 연결됨${d.email ? ` (${d.email})` : ''} · 모델 ${d.model ?? '-'} · ${d.active ? '지금 사용 중' : '사용 안 함(설정 aiSource가 다름)'}\n모델 목록: ${d.models.map(m => m.slug).join(', ') || '(없음)'}`
+        : 'ChatGPT 계정이 연결돼 있지 않습니다. `kaist chatgpt login`');
+  }));
+
 program.command('ai')
-  .description('내장 AI에게 묻기 (로컬 모델 기본, 설정에 API 키가 있으면 그 모델)')
+  .description('내장 AI에게 묻기 (로컬 모델 기본; 설정에 따라 API 키 모델 또는 ChatGPT 플랜)')
   .argument('<프롬프트>', '질문/지시')
   .option('--json', 'JSON 출력')
   .action(run(async (prompt: string, opts: { json?: boolean }) => {
