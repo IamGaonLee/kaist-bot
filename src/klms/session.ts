@@ -1,7 +1,6 @@
 // 세션 확보: 쿠키 파일 → 프로브 → (만료 시) 브라우저 로그인. 설계 5절.
-import type { Cookie } from 'playwright';
 import { KaistError, SessionExpiredError } from '../errors.js';
-import { browserLogin } from '../sso/browser-login.js';
+import { browserLogin, type BrowserCookie } from '../sso/browser-login.js';
 import { callAjax, InvalidSesskeyError } from './ajax.js';
 import { KlmsHttp } from './http.js';
 import { SessionStore, type SessionFile, type StoredCookie } from './session-store.js';
@@ -48,7 +47,7 @@ function makeSession(http: KlmsHttp, sesskey: string): KlmsSession {
   return s;
 }
 
-const toStored = (c: Cookie): StoredCookie => ({ name: c.name, value: c.value, domain: c.domain.replace(/^\./, ''), path: c.path, expires: c.expires });
+const toStored = (c: BrowserCookie): StoredCookie => ({ name: c.name, value: c.value, domain: c.domain.replace(/^\./, ''), path: c.path, expires: c.expires });
 
 /** 저장된 세션만 확인 (브라우저 띄우지 않음) */
 export async function resumeSession(store = new SessionStore()): Promise<KlmsSession | null> {

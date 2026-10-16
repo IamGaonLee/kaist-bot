@@ -1,7 +1,6 @@
 // 사이트별 세션 프로브와 연쇄 로그인. 만료 신호는 S8a 검증 결과 (docs/portal-design.md).
-import type { Cookie } from 'playwright';
 import { KaistError } from '../errors.js';
-import { chainLogin, cookiesFor, type LoginStep } from '../sso/browser-login.js';
+import { chainLogin, cookiesFor, type BrowserCookie, type LoginStep } from '../sso/browser-login.js';
 import { KlmsHttp } from '../klms/http.js';
 import { probe as probeKlms } from '../klms/session.js';
 import { SessionStore, SITES, type SessionFile, type SiteId, type StoredCookie } from '../klms/session-store.js';
@@ -87,10 +86,10 @@ export function siteStatuses(store = new SessionStore()): SiteStatus[] {
 
 const HOST: Record<SiteId, string> = { klms: KLMS_HOST, portal: SITE_DEFS.portal.host, erp: SITE_DEFS.erp.host, kds: SITE_DEFS.kds.host };
 
-const toStored = (c: Cookie): StoredCookie => ({ name: c.name, value: c.value, domain: c.domain.replace(/^\./, ''), path: c.path, expires: c.expires });
+const toStored = (c: BrowserCookie): StoredCookie => ({ name: c.name, value: c.value, domain: c.domain.replace(/^\./, ''), path: c.path, expires: c.expires });
 
 /** 브라우저 쿠키 → 사이트별 세션 (사이트 자기 호스트만, SSO·상위 도메인 쿠키 제외) */
-export function splitCookies(cookies: Cookie[], now = new Date().toISOString()): Partial<Record<SiteId, SessionFile>> {
+export function splitCookies(cookies: BrowserCookie[], now = new Date().toISOString()): Partial<Record<SiteId, SessionFile>> {
   const out: Partial<Record<SiteId, SessionFile>> = {};
   for (const site of SITES) {
     const own = cookiesFor(cookies, HOST[site]);

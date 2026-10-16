@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { installPlaywrightPlatform } from './platform.js';
 import { KaistError, exitCodeOf } from './errors.js';
 import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
@@ -726,4 +727,5 @@ program.command('doctor')
     if (!allOk) process.exitCode = 1;
   }));
 
+installPlaywrightPlatform();
 await program.parseAsync();
