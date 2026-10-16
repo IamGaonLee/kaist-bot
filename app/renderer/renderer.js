@@ -1,6 +1,6 @@
 // 렌더러 UI 로직 (plain JS). window.kaist는 preload가 노출.
 const $ = id => document.getElementById(id);
-const screens = ['wizard', 'idle', 'progress', 'approve', 'done', 'fail', 'sync'];
+const screens = ['wizard', 'idle', 'progress', 'approve', 'done', 'fail', 'sync', 'chat'];
 let loggedIn = false;
 function show(name) {
   for (const s of screens) $('screen-' + s).classList.toggle('hidden', s !== name);
@@ -99,6 +99,31 @@ if ($('wz-drive')) $('wz-drive').addEventListener('click', wizardDrive);
 if ($('wz-google')) $('wz-google').addEventListener('click', wizardGoogle);
 if ($('wz-done')) $('wz-done').addEventListener('click', () => show('idle'));
 if ($('btn-setup')) $('btn-setup').addEventListener('click', async () => { await refreshWizard(); show('wizard'); });
+
+// 대화
+function chatAppend(who, text) {
+  const div = document.createElement('div');
+  div.style.margin = '6px 0';
+  div.innerHTML = '<b style="color:' + (who === '나' ? 'var(--fg)' : 'var(--accent)') + '">' + who + ':</b> ';
+  div.appendChild(document.createTextNode(text));
+  $('chat-log').appendChild(div);
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+}
+async function chatSend() {
+  const q = $('chat-input').value.trim();
+  if (!q) return;
+  $('chat-input').value = '';
+  chatAppend('나', q);
+  chatAppend('AI', '…생각 중');
+  const thinking = $('chat-log').lastChild;
+  let res; try { res = await window.kaist.ask(q); } catch (e) { res = { ok: false, error: { message: String(e) } }; }
+  thinking.remove();
+  chatAppend('AI', (res && res.ok) ? res.answer : ('오류: ' + ((res && res.error && res.error.message) || '')));
+}
+if ($('btn-chat')) $('btn-chat').addEventListener('click', () => { show('chat'); $('chat-input').focus(); });
+if ($('chat-send')) $('chat-send').addEventListener('click', chatSend);
+if ($('chat-input')) $('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') chatSend(); });
+if ($('chat-back')) $('chat-back').addEventListener('click', () => show(loggedIn ? 'done' : 'idle'));
 
 // 앱 정보·상태 구독 (실패해도 버튼에는 영향 없음)
 (async () => {

@@ -76,7 +76,22 @@
         <button id="btn-sync-idle">지금 동기화</button>
         <button id="btn-login" style="background:transparent; color:var(--accent); border:1px solid var(--line);">로그인</button>
       </div>
-      <div style="margin-top:10px"><button id="btn-setup" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">설정</button></div>
+      <div style="margin-top:10px; display:flex; gap:10px; justify-content:center;">
+        <button id="btn-chat" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">AI에게 묻기</button>
+        <button id="btn-setup" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">설정</button>
+      </div>
+    </div>
+
+    <!-- 대화 -->
+    <div class="card hidden" id="screen-chat" style="text-align:left">
+      <div class="title" style="text-align:center">AI에게 묻기</div>
+      <div class="muted" style="text-align:center; font-size:12px; margin-bottom:8px">드라이브 요약·과제·일정을 근거로 답합니다.</div>
+      <div id="chat-log" style="max-height:300px; overflow:auto; font-size:13px; line-height:1.5"></div>
+      <div style="display:flex; gap:6px; margin-top:10px">
+        <input id="chat-input" placeholder="예: 이번 주 과제 뭐 있어?" style="flex:1; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:inherit">
+        <button id="chat-send">보내기</button>
+      </div>
+      <div style="text-align:center; margin-top:10px"><button id="chat-back" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">← 돌아가기</button></div>
     </div>
     <!-- 로그인 중 -->
     <div class="card hidden" id="screen-progress">

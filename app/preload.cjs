@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('kaist', {
   appInfo: () => ipcRenderer.invoke('app:info'),
   login: (opts) => ipcRenderer.invoke('login', opts),
   sync: () => ipcRenderer.invoke('sync'),
+  ask: (q) => ipcRenderer.invoke('ask', q),
   setupState: () => ipcRenderer.invoke('setup:state'),
   pickDrive: () => ipcRenderer.invoke('drive:pick'),
   googleLogin: (opts) => ipcRenderer.invoke('google:login', opts),

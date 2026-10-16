@@ -121,6 +121,21 @@ ipcMain.handle('login', async (_e, opts?: { saveId?: boolean; show?: boolean }) 
   }
 });
 
+// 대화: 로컬 자료를 근거로 내장 AI가 답한다 (E2)
+ipcMain.handle('ask', async (_e, question: string) => {
+  try {
+    const { getAiProvider } = await import('../src/ai/provider.js');
+    const { gatherContext, CHAT_SYSTEM } = await import('../src/ai/context.js');
+    const p = await getAiProvider();
+    await p.ensureReady?.((m: string) => win?.webContents.send('status', m));
+    const answer = await p.complete(CHAT_SYSTEM, `자료:\n${gatherContext()}\n\n질문: ${question}`, { maxTokens: 500 });
+    return { ok: true, answer, provider: p.name };
+  } catch (e) {
+    const err = e as { message?: string };
+    return { ok: false, error: { message: err.message ?? String(e) } };
+  }
+});
+
 // 첫 실행 설정 마법사 (D)
 ipcMain.handle('setup:state', () => ({
   hasSavedId: !!getSavedId(),
