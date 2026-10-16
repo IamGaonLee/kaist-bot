@@ -95,9 +95,22 @@
         <button id="btn-sync-idle">지금 동기화</button>
         <button id="btn-login" style="background:transparent; color:var(--accent); border:1px solid var(--line);">로그인</button>
       </div>
-      <div style="margin-top:10px; display:flex; gap:10px; justify-content:center;">
+      <div style="margin-top:10px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         <button id="btn-chat" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">AI에게 묻기</button>
+        <button id="btn-suggest" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">AI 일정 제안</button>
         <button id="btn-setup" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">설정</button>
+      </div>
+    </div>
+
+    <!-- AI 일정 제안 -->
+    <div class="card hidden" id="screen-suggest" style="text-align:left">
+      <div class="title" style="text-align:center">AI 일정 제안</div>
+      <div class="muted" style="text-align:center; font-size:12px; margin-bottom:8px">공지에서 시험·휴강 등을 뽑아 보여줍니다. <b>확인 후 등록</b>합니다(자동 등록 아님).</div>
+      <div id="suggest-list" style="max-height:320px; overflow:auto; font-size:13px"></div>
+      <div style="text-align:center; margin-top:12px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+        <button id="suggest-run">공지 분석</button>
+        <button id="suggest-preview" style="background:transparent; color:var(--accent); border:1px solid var(--line)">미리보기(전체)</button>
+        <button id="suggest-back" style="background:transparent; color:var(--sub); border:1px solid var(--line)">← 돌아가기</button>
       </div>
     </div>
 

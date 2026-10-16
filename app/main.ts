@@ -121,6 +121,34 @@ ipcMain.handle('login', async (_e, opts?: { saveId?: boolean; show?: boolean }) 
   }
 });
 
+// AI 일정 제안: 공지에서 후보를 뽑아 보여주고(등록 안 함), 사용자가 확인하면 등록
+ipcMain.handle('events:suggest', async (_e, opts?: { all?: boolean }) => {
+  try {
+    const { suggestEvents } = await import('../src/ai/events.js');
+    const suggestions = await suggestEvents({ all: !!(opts && opts.all), onStatus: (m: string) => win?.webContents.send('status', m) });
+    return { ok: true, suggestions };
+  } catch (e) {
+    const err = e as { message?: string };
+    return { ok: false, error: { message: err.message ?? String(e) } };
+  }
+});
+
+ipcMain.handle('events:register', async (_e, s: { candidateId: number; course: string; kind: string; date: string; start?: string; quote: string }) => {
+  try {
+    const { registerSuggestion } = await import('../src/ai/events.js');
+    const r = await registerSuggestion(s as never);
+    return { ok: true, id: r.event?.id ?? null };
+  } catch (e) {
+    const err = e as { code?: string; message?: string };
+    return { ok: false, error: { code: err.code, message: err.message ?? String(e) } };
+  }
+});
+
+ipcMain.handle('events:dismiss', async (_e, candidateId: number) => {
+  try { const { dismissSuggestion } = await import('../src/ai/events.js'); dismissSuggestion(candidateId); return { ok: true }; }
+  catch (e) { return { ok: false, error: { message: (e as { message?: string }).message } }; }
+});
+
 // 대화: 로컬 자료를 근거로 내장 AI가 답한다 (E2)
 ipcMain.handle('ask', async (_e, question: string) => {
   try {

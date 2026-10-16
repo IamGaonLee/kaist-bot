@@ -1,6 +1,7 @@
 // 렌더러 UI 로직 (plain JS). window.kaist는 preload가 노출.
 const $ = id => document.getElementById(id);
-const screens = ['wizard', 'idle', 'progress', 'approve', 'done', 'fail', 'sync', 'chat'];
+const screens = ['wizard', 'idle', 'progress', 'approve', 'done', 'fail', 'sync', 'chat', 'suggest'];
+const KIND_KO = { exam: '시험', no_class: '휴강', online: '온라인 수업', makeup: '보강' };
 let loggedIn = false;
 function show(name) {
   for (const s of screens) $('screen-' + s).classList.toggle('hidden', s !== name);
@@ -172,6 +173,46 @@ async function chatSend() {
   thinking.remove();
   chatAppend('AI', (res && res.ok) ? res.answer : ('오류: ' + ((res && res.error && res.error.message) || '')));
 }
+// AI 일정 제안
+function suggestRender(list) {
+  const box = $('suggest-list');
+  box.innerHTML = '';
+  if (!list.length) { box.innerHTML = '<div class="muted" style="text-align:center; padding:12px">제안할 일정이 없습니다. (새로 받은 공지가 없거나, AI가 일정을 찾지 못함)</div>'; return; }
+  for (const s of list) {
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:10px; margin:7px 0';
+    const time = s.start ? ' ' + s.start : '';
+    row.innerHTML = `<div><b>${s.date}${time}</b> · ${s.course} · ${KIND_KO[s.kind] || s.kind} <span class="muted" style="font-size:11px">[${s.grade}]</span></div>`
+      + `<div class="muted" style="font-size:12px; margin:3px 0">"${s.quote}"</div>`
+      + (s.reasons && s.reasons.length ? `<div class="muted" style="font-size:11px">확인: ${s.reasons.join(', ')}</div>` : '');
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex; gap:6px; margin-top:7px';
+    const reg = document.createElement('button'); reg.textContent = '등록'; reg.style.cssText = 'font-size:12px; padding:6px 12px';
+    const dis = document.createElement('button'); dis.textContent = '무시'; dis.style.cssText = 'font-size:12px; padding:6px 12px; background:transparent; color:var(--sub); border:1px solid var(--line)';
+    const msg = document.createElement('span'); msg.className = 'muted'; msg.style.cssText = 'font-size:11px; align-self:center';
+    reg.addEventListener('click', async () => {
+      reg.disabled = true; dis.disabled = true; msg.textContent = '등록 중…';
+      const r = await window.kaist.eventsRegister({ candidateId: s.candidateId, course: s.course, kind: s.kind, date: s.date, start: s.start || undefined, quote: s.quote }).catch(e => ({ ok: false, error: { message: String(e) } }));
+      msg.textContent = r.ok ? '✓ 캘린더에 등록' : ('실패: ' + ((r.error && r.error.message) || ''));
+      if (r.ok) { reg.remove(); dis.remove(); }
+      else { reg.disabled = false; dis.disabled = false; }
+    });
+    dis.addEventListener('click', async () => { await window.kaist.eventsDismiss(s.candidateId); row.style.opacity = .4; reg.remove(); dis.remove(); msg.textContent = '무시함'; });
+    btns.appendChild(reg); btns.appendChild(dis); btns.appendChild(msg);
+    row.appendChild(btns); box.appendChild(row);
+  }
+}
+async function suggestRun(all) {
+  $('suggest-list').innerHTML = '<div class="muted" style="text-align:center; padding:12px">공지를 분석하는 중… (로컬 AI, 수십 초 걸릴 수 있어요)</div>';
+  let res; try { res = await window.kaist.eventsSuggest({ all: !!all }); } catch (e) { res = { ok: false, error: { message: String(e) } }; }
+  if (res && res.ok) suggestRender(res.suggestions);
+  else $('suggest-list').innerHTML = '<div class="err" style="text-align:center; padding:12px">오류: ' + ((res && res.error && res.error.message) || '') + '</div>';
+}
+if ($('btn-suggest')) $('btn-suggest').addEventListener('click', () => { show('suggest'); $('suggest-list').innerHTML = '<div class="muted" style="text-align:center; padding:12px">"공지 분석"을 눌러 주세요. (새 공지가 없으면 "미리보기"로 전체를 봅니다)</div>'; });
+if ($('suggest-run')) $('suggest-run').addEventListener('click', () => suggestRun(false));
+if ($('suggest-preview')) $('suggest-preview').addEventListener('click', () => suggestRun(true));
+if ($('suggest-back')) $('suggest-back').addEventListener('click', () => show(loggedIn ? 'done' : 'idle'));
+
 if ($('btn-chat')) $('btn-chat').addEventListener('click', () => { show('chat'); $('chat-input').focus(); });
 if ($('chat-send')) $('chat-send').addEventListener('click', chatSend);
 if ($('chat-input')) $('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') chatSend(); });
