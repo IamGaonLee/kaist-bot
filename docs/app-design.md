@@ -69,7 +69,8 @@
   - `kaist login --save-id`로 1차에 사용자가 입력한 아이디를 캡처·저장(`account.json`, 평문, LOCALAPPDATA), 이후 `kaist login`에서 **폰 승인만으로** 4개 사이트 로그인(실측: 포털 버튼·아이디 입력·로그인·기기 등록·KLMS 버튼 모두 자동). `--forget-id`로 삭제.
   - 실패 감지: `page.on('dialog')`로 alert를 잡아 분류해 멈춘다. 2단계 인증 시간 초과 alert를 실제로 잡아 "시간이 초과되었습니다"로 멈춤을 실측. 다른 실패(잠금·거절 등)는 계정 잠금 위험 때문에 일부러 유발하진 않았다.
   - 구현: 포트에 `prepare`(매 대기 회 화면 넘김)/`captureId` 훅, 드라이버에 자동 입력·dialog 감시·`KAIST_LOGIN_DEBUG`, `sso/account.ts`(아이디 저장, 기본 꺼짐), `loginAll({fillId, saveId})`, 모든 단계에 `advanceLogin`.
-  - 비고: portal-design §7 "로그인 창에서 CLI는 이동만, 폼 조작·클릭 안 함"을 아이디 칸+로그인 버튼에 한해 완화(비밀번호·기기 등록은 그대로 사용자). 병합 때 CLAUDE.md·portal-design 반영.
+  - 비고: portal-design §7 "로그인 창에서 CLI는 이동만, 폼 조작·클릭 안 함"을 완화(아이디·포털·기기 등록·KLMS 버튼까지 프로그램이 누름). 비밀번호·폰 승인은 그대로 사용자. 병합 때 CLAUDE.md·portal-design 반영.
+  - **창 숨김 + 앱 화면 (2026-10-16 사용자 요청, 실측):** 자동 넘김이 되므로 브라우저를 숨기고(CLI headless, Electron은 `show:false`) 사용자에겐 ① 폰 승인 요청+인증 번호 ② 로그인 중 ③ 완료/실패만 보인다. 2단계 인증 번호는 `.auth_number`에서 뽑아 `describe`로 올린다(두 번 나오면 중복 제거→2자리). 실측: `kaist login`이 창 없이 폰 승인만으로 4개 사이트 로그인. `--show-browser`로 창 표시(아이디 미저장 시 자동).
 - **C. Electron 껍데기:** `app/`(main·workers·preload·renderer), 트레이, 단일 인스턴스, 앱 안 로그인 창, `printToPDF`, 자동 sync 타이머+resume, Windows 알림. 코어는 어댑터로 재사용. 완료 기준: 앱 실행 → 앱 안 창 로그인(아이디만) → sync → 드라이브 저장 → 트레이·알림.
 - **D. 설정 마법사:** 첫 실행 — 계정, 구글 승인(캘린더 기본·Gmail 선택), 드라이브 폴더 선택, 모델 다운로드. 완료 기준: 새 설치에서 마법사만으로 동작까지.
 - **E. 로컬 LLM:** node-llama-cpp utilityProcess, 하드웨어 감지·모델 선택·다운로드, JSON 스키마로 후보의 인용·종류·날짜 원문 추출, 대화창(로컬 파일 근거), 자기 키 공급자 추상화. 완료 기준: S6 후보 47건 오프라인 추출에서 잘못 자동 등록된 A등급 0건, 대화창이 로컬 파일로 답함.
