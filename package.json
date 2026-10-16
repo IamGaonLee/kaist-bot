@@ -4,12 +4,15 @@
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
     "build": "tsc -p .",
-    "dev": "tsx src/cli.ts"
+    "dev": "tsx src/cli.ts",
+    "build:app": "tsc -p tsconfig.electron.json && node scripts/copy-renderer.mjs",
+    "app": "npm run build:app && electron dist-electron/app/main.js"
   },
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/turndown": "^5.0.6",
+    "electron": "^44.8.0",
     "playwright": "^1.64.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
@@ -17,10 +20,10 @@
   "dependencies": {
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
+    "jszip": "^3.10.2",
     "marked": "^15.0.12",
-    "turndown": "^7.2.4",
     "pdfjs-dist": "^4.10.38",
-    "jszip": "^3.10.2"
+    "turndown": "^7.2.4"
   },
   "bin": {
     "kaist": "dist/cli.js"

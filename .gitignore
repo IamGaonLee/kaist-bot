@@ -3,3 +3,4 @@ local/
 
 dist/
 scripts/local/
+dist-electron/
