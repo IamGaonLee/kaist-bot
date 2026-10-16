@@ -1,12 +1,48 @@
 // 렌더러 UI 로직 (plain JS). window.kaist는 preload가 노출.
 const $ = id => document.getElementById(id);
-const screens = ['idle', 'progress', 'approve', 'done', 'fail', 'sync'];
+const screens = ['wizard', 'idle', 'progress', 'approve', 'done', 'fail', 'sync'];
 let loggedIn = false;
 function show(name) {
   for (const s of screens) $('screen-' + s).classList.toggle('hidden', s !== name);
 }
 
+// ---- 첫 실행 설정 마법사 ----
+async function refreshWizard() {
+  let st;
+  try { st = await window.kaist.setupState(); } catch (e) { return null; }
+  $('account-badge').textContent = st.hasSavedId ? '✓ 저장됨' : '필요';
+  $('wz-login').textContent = st.hasSavedId ? '다시 로그인' : '로그인하고 아이디 저장';
+  $('drive-badge').textContent = st.driveRootExists ? '✓' : '폴더 확인 필요';
+  $('drive-path').textContent = st.driveRoot;
+  $('google-badge').textContent = st.hasGoogleToken ? ('✓ 연결됨' + (st.hasGmail ? ' (메일 포함)' : '')) : '필요';
+  if (st.hasGmail) $('wz-gmail').checked = true;
+  $('wz-done').disabled = !(st.hasSavedId && st.hasGoogleToken);
+  return st;
+}
+function wzStatus(msg) { $('wz-status').textContent = msg || ''; }
+async function wizardLogin() {
+  wzStatus('로그인 창이 뜹니다. 아이디를 입력하고 폰 승인을 해 주세요…');
+  let res; try { res = await window.kaist.login({ saveId: true, show: true }); } catch (e) { res = { ok: false, error: { message: String(e) } }; }
+  wzStatus(res && res.ok ? '계정 저장 완료.' : ('로그인 실패: ' + ((res && res.error && res.error.message) || '')));
+  await refreshWizard();
+}
+async function wizardDrive() {
+  wzStatus('폴더를 선택하세요…');
+  let res; try { res = await window.kaist.pickDrive(); } catch (e) { res = { ok: false }; }
+  wzStatus(res && res.ok ? '폴더 저장 완료.' : '폴더 선택 취소.');
+  await refreshWizard();
+}
+async function wizardGoogle() {
+  wzStatus('브라우저에서 구글 계정으로 승인해 주세요…');
+  const gmail = $('wz-gmail').checked;
+  let res; try { res = await window.kaist.googleLogin({ gmail }); } catch (e) { res = { ok: false, error: { message: String(e) } }; }
+  wzStatus(res && res.ok ? '구글 연결 완료.' : ('구글 승인 실패: ' + ((res && res.error && res.error.message) || '')));
+  await refreshWizard();
+}
+
 function applyStatus(msg) {
+  // 마법사 중에는 마법사 안에만 표시(화면 전환 안 함). 로그인 창이 보여 사용자가 거기서 처리.
+  if (!$('screen-wizard').classList.contains('hidden')) { wzStatus(msg); return; }
   const m = /인증 번호:\s*([0-9A-Za-z]+)/.exec(msg || '');
   if (m) { $('auth-num').textContent = m[1]; show('approve'); return; }
   // 동기화 중이면 sync 화면의 보조 문구를 갱신
@@ -58,6 +94,11 @@ for (const id of ['btn-login', 'btn-again', 'btn-retry']) {
   if (el) el.addEventListener('click', doLogin);
 }
 for (const id of ['btn-sync', 'btn-sync-idle']) { if ($(id)) $(id).addEventListener('click', doSync); }
+if ($('wz-login')) $('wz-login').addEventListener('click', wizardLogin);
+if ($('wz-drive')) $('wz-drive').addEventListener('click', wizardDrive);
+if ($('wz-google')) $('wz-google').addEventListener('click', wizardGoogle);
+if ($('wz-done')) $('wz-done').addEventListener('click', () => show('idle'));
+if ($('btn-setup')) $('btn-setup').addEventListener('click', async () => { await refreshWizard(); show('wizard'); });
 
 // 앱 정보·상태 구독 (실패해도 버튼에는 영향 없음)
 (async () => {
@@ -71,5 +112,9 @@ for (const id of ['btn-sync', 'btn-sync-idle']) { if ($(id)) $(id).addEventListe
     }
     if (window.kaist && window.kaist.onStatus) window.kaist.onStatus(applyStatus);
     if (window.kaist && window.kaist.onTriggerSync) window.kaist.onTriggerSync(() => { if (loggedIn) doSync(); });
+    // 설정이 덜 됐으면 마법사부터
+    const st = await refreshWizard();
+    if (st && !(st.hasSavedId && st.hasGoogleToken)) show('wizard');
+    else show('idle');
   } catch (e) { $('ver').textContent = 'init 오류'; }
 })();

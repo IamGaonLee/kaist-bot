@@ -3,8 +3,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('kaist', {
   appInfo: () => ipcRenderer.invoke('app:info'),
-  login: () => ipcRenderer.invoke('login'),
+  login: (opts) => ipcRenderer.invoke('login', opts),
   sync: () => ipcRenderer.invoke('sync'),
+  setupState: () => ipcRenderer.invoke('setup:state'),
+  pickDrive: () => ipcRenderer.invoke('drive:pick'),
+  googleLogin: (opts) => ipcRenderer.invoke('google:login', opts),
   onStatus: (cb) => {
     const h = (_e, msg) => cb(msg);
     ipcRenderer.on('status', h);

@@ -414,7 +414,7 @@ cal.command('login')
   .description('구글 계정 승인 (브라우저). 범위: 이 앱이 만든 캘린더만')
   .option('--json', 'JSON 출력')
   .action(run(async (opts: { json?: boolean }) => {
-    await googleLogin(status);
+    await googleLogin(status, { gmail: true });
     const id = await ensureCalendar();
     output(opts.json, { calendarId: id }, () => '구글 캘린더를 연결했습니다. "KLMS" 캘린더를 준비했습니다.');
   }));
@@ -648,7 +648,7 @@ program.command('google')
   .description('구글 승인 (캘린더: 이 앱이 만든 캘린더만 + Gmail 읽기 전용)')
   .option('--json', 'JSON 출력')
   .action(run(async (opts: { json?: boolean }) => {
-    await googleLogin(status);
+    await googleLogin(status, { gmail: true });
     const id = await ensureCalendar();
     output(opts.json, { calendarId: id, gmail: hasGmailScope() }, d => `구글을 연결했습니다 (캘린더${d.gmail ? ' + Gmail 읽기' : ''}).`);
   }));

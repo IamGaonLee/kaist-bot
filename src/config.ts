@@ -40,3 +40,18 @@ export function loadSettings(): Settings {
   }
   return { driveRoot: process.env.KAIST_DRIVE_ROOT ?? user.driveRoot ?? 'G:\\내 드라이브\\KAIST' };
 }
+
+const configFile = () => path.join(home, 'config.json');
+
+/** config.json의 일부를 병합 저장 (없던 키는 추가) */
+export function saveSettings(patch: Partial<Settings>): void {
+  let cur: Partial<Settings> = {};
+  if (fs.existsSync(configFile())) {
+    try { cur = JSON.parse(fs.readFileSync(configFile(), 'utf8').replace(/^\uFEFF/, '')) as Partial<Settings>; } catch { /* 새로 쓴다 */ }
+  }
+  ensureDir(home);
+  fs.writeFileSync(configFile(), JSON.stringify({ ...cur, ...patch }, null, 2));
+}
+
+/** 설정 파일이 있는지 (첫 실행 판별 보조) */
+export const hasConfig = () => fs.existsSync(configFile());
