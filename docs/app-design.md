@@ -75,7 +75,7 @@
   - C1 트레이 앱 껍데기(창·트레이·단일 인스턴스). preload는 CJS여야 함(ESM이면 "Cannot use import" → `.cjs`). main은 ESM 가능(Electron 44).
   - C2 앱 안 로그인: `app/electron-login.ts` 숨긴 BrowserWindow(메모리 partition)에서 로그인. `executeJavaScript`로 포트 evaluate 구현(함수 직렬화), `login-preload.cjs`가 alert 가로채 실패 감지, `session.cookies`로 쿠키. 렌더러 세 화면(폰 승인·번호/로그인 중/완료). 실측: 창 없이 폰 승인만으로 4개 사이트 로그인.
   - C3 앱 동기화: sync IPC(runSync), 드라이브 저장, PDF는 `electron-pdf.ts` printToPDF(실측 `_요약.pdf` 재생성). 트레이 "지금 동기화". CSS·md→HTML은 `src/files/pdf-html.ts`로 공유.
-  - **미해결:** Windows 토스트 알림이 포장 안 된 개발 상태에선 안 뜸(AUMID에 연결된 시작 메뉴 바로가기 필요). 코드(`Notification`)는 맞고, 설치 프로그램(F단계)이 바로가기를 만들면 뜬다. F에서 확인.
+  - Windows 토스트 알림: 동작 확인(개발 상태에서도 `isSupported=true`, show 이벤트, 화면에 토스트 뜸 — 실측). 포장(F단계) 시 앱 아이콘·이름이 제대로 붙는다.
   - 구조: `tsconfig.electron.json`(src+app→dist-electron), `build:app`/`app` 스크립트. Playwright 미로드(앱은 Electron 어댑터만).
 - **D. 설정 마법사:** 첫 실행 — 계정, 구글 승인(캘린더 기본·Gmail 선택), 드라이브 폴더 선택, 모델 다운로드. 완료 기준: 새 설치에서 마법사만으로 동작까지.
 - **E. 로컬 LLM:** node-llama-cpp utilityProcess, 하드웨어 감지·모델 선택·다운로드, JSON 스키마로 후보의 인용·종류·날짜 원문 추출, 대화창(로컬 파일 근거), 자기 키 공급자 추상화. 완료 기준: S6 후보 47건 오프라인 추출에서 잘못 자동 등록된 A등급 0건, 대화창이 로컬 파일로 답함.
