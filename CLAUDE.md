@@ -1,6 +1,6 @@
-# KAISTBOT — `kaist` CLI
+# KAISTBOT — `kaist` CLI + 데스크톱 앱
 
-KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니다. 수집한 것은 구글 드라이브 폴더와 전용 구글 캘린더 "KLMS"에 정리합니다. 개인 Windows PC에서만 쓰는 TypeScript CLI이고, Claude Code가 이 CLI를 도구로 써서 학교생활을 논의합니다.
+KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니다. 수집한 것은 구글 드라이브 폴더와 전용 구글 캘린더 "KLMS"에 정리합니다. Windows용 TypeScript 프로그램이고, 두 가지 형태가 같은 코어(`src/`)를 씁니다: (1) `kaist` CLI — Claude Code가 도구로 써서 학교생활을 논의한다, (2) **Electron 데스크톱 앱(`app/`)** — 지인에게 배포하는 트레이 앱(설정 마법사·숨김 로그인·동기화·대화창·내장 AI). 저장소: https://github.com/IamGaonLee/kaist-bot
 
 ## 현재 단계
 
@@ -16,7 +16,14 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - S8b 완료 (2026-10-15): sync가 포털 시간표·학사일정, 생활관 배정 정보를 받는다. 학사 주요 일정 15건 캘린더 자동 등록(색 10, `[학사]`), 휴강·온라인 시각은 시간표 기준(그날 수업 1개일 때만)
 - S8c 완료 (2026-10-15): 포털 학사 공지(수강/학적·장학/복지·생활관 본문, 세미나 제목만) 증분 수집, `notices --source portal`, 드라이브 `_학교공지.md`(제목 목록). 연속 sync 중복 0
 - S8d 완료 (2026-10-15): `kaist grades [--refresh]`. ERP는 `--refresh`일 때만 접속(sync는 접속 안 함), 로컬 DB에만 저장, 격리 테스트 통과. 누적 평점은 계산값(`computed: true`)
-- 다음: 미정 (2026-10-15 사용자 결정: 카카오톡 연결 취소, 웹 서버 방식 보류. 노트북이 꺼져 있을 때는 드라이브 파일·Gmail 커넥터로 쓰고, 켜져 있을 때 claude.ai/code 원격 제어)
+- **데스크톱 앱 A~F 완료 (2026-10-16, feature/app→main, v1.0.0 릴리스). 설계·결정·실측은 `docs/app-design.md`, 배포는 `docs/publish.md`:**
+  - A: 코어에서 Playwright 분리 — 로그인·PDF를 포트(`src/sso/browser-login.ts`, `src/files/pdf.ts`)로 두고 어댑터로. CLI는 `src/platform.ts`(Playwright), 앱은 `app/platform-electron.ts`(Electron).
+  - B: **간편 로그인(아이디만)** — SSO 간편 로그인 탭에 아이디만 채우고 폰 승인(비밀번호는 안 받음·안 저장, KAIST 정보보안지침 제75조①7호 준수). 프로그램이 화면(포털·SSO·기기 등록 '등록 안함'·KLMS 로그인)을 자동으로 넘기고, 창을 숨겨(headless) 2단계 인증 번호만 보여준다. 실패는 alert로 분류(`src/sso/login-dialog.ts`). 아이디 저장은 선택(`src/sso/account.ts`, `--save-id`/`--forget-id`, 기본 꺼짐). `--show-browser`로 창 표시.
+  - C: Electron 트레이 앱(`app/`) — 숨긴 BrowserWindow 로그인(세 화면), 동기화→드라이브 저장, `printToPDF`, 트레이, Windows 알림. preload는 CJS(`.cjs`).
+  - D: 첫 실행 설정 마법사 — 계정·드라이브 폴더·구글(범위 분리: 캘린더 기본/Gmail 선택)·AI 모델.
+  - E: 내장 AI(`src/ai/`) — 로컬 node-llama-cpp(Vulkan, 기본 Qwen2.5-3B Q4), `kaist ask`·앱 대화창(드라이브 자료 근거), 자기 API 키로 GPT·Claude·Gemini(OpenAI 호환). 일정 추출은 verifyEvent로 채점하되 로컬 제안은 자동 A 금지(전부 사용자 확인) → 잘못 자동 등록 0.
+  - F: 홈페이지·설명서(`site/`, GitHub Pages), electron-builder NSIS(`npm run dist`, 로컬은 개발자 모드 필요), CI(`.github/workflows/` release·pages).
+- 다음: 미정 (카카오톡 연결·웹 서버 방식은 보류)
 
 ## 에이전트로 쓸 때 (학교생활 논의)
 
@@ -68,14 +75,16 @@ src/               CLI 본체 (S1부터)
 
 - 빌드 `npm run build` (dist/), 전역 명령 연결 `npm link` → `kaist`
 - 개발 실행 `npm run dev -- <명령>`, 테스트 `npm test` (tests/, 합성 데이터만)
-- 코드 배치: `src/sso/`(사이트 무관 로그인 창·연쇄), `src/sites/`(포털·ERP·kds 허용 목록 `sites.ts`, HTTP, 프로브), `src/klms/`(site.ts 상수·판별, http.ts 공통 계층, ajax.ts, session.ts, courses.ts), `src/store/`(로컬 데이터)
+- 앱: `npm run build:app`(dist-electron/), `npm run app`(실행), `npm run dist`(설치 파일; 로컬 Windows는 개발자 모드 필요, 보통 CI로 빌드). 앱 코드는 `app/`(main.ts·preload.cjs·login-preload.cjs·electron-login.ts·electron-pdf.ts·platform-electron.ts·renderer/). 코어는 포트만 쓰고 플랫폼 어댑터에서만 Playwright/Electron을 연결한다(`src/platform.ts` vs `app/platform-electron.ts`).
+- 코드 배치: `src/sso/`(로그인 포트 `browser-login.ts`+Playwright 어댑터, 실패 분류 `login-dialog.ts`, 아이디 저장 `account.ts`), `src/sites/`(포털·ERP·kds 허용 목록 `sites.ts`, HTTP, 프로브, 연쇄 로그인 `session.ts`), `src/klms/`(site.ts 상수·판별, http.ts, ajax.ts, session.ts, courses.ts), `src/ai/`(공급자·로컬 node-llama-cpp·외부 키·모델 카탈로그·대화 컨텍스트), `src/files/`(pdf 포트+어댑터), `src/store/`(로컬 데이터)
 - 종료 코드: 0 성공, 1 오류, 2 세션 만료(`--no-login`), 3 로그인 취소, 4 사용자 확인 필요(B등급, 삭제·되돌리기 미리보기)
 - 명령 (모두 `--json` 지원):
-  - `kaist login [--force] [--only klms|portal|erp|kds]`, `kaist status [--check]`(사이트별 유효/만료), `kaist courses [--refresh] [--no-login]`
+  - `kaist login [--force] [--only klms|portal|erp|kds] [--save-id] [--forget-id] [--show-browser]`: 간편 로그인(아이디만, 폰 승인). 저장된 아이디가 있으면 창을 숨기고 2단계 인증 번호만 보여준다. `--save-id`로 아이디 저장(기본 꺼짐). `kaist status [--check]`(사이트별 유효/만료), `kaist courses [--refresh] [--no-login]`
   - `kaist sync [--course X] [--no-login] [--no-portal]`: KLMS 접속. 이어서 포털·생활관(세션이 있을 때, 만료면 경고만). 과목 페이지, updates_since, 캘린더(사이트 전체 월별), 과제 페이지(새것·변경·마감 임박만), 게시판 새 글
   - `kaist timetable`, `kaist school [list|undo]`, `kaist dorm`: 로컬 DB만
   - `kaist grades [--refresh] [--no-login]`: 기본은 로컬, `--refresh`만 ERP 접속
   - `kaist assignments [--due 7d] [--all] [--course X]`, `kaist notices [--source klms|portal] [--board X] [--since 3d] [--kind notice|qna|board] [--body]`, `kaist videos`: 로컬 DB만
+  - `kaist ask <질문> [--course X]`: 로컬 자료(드라이브 요약·과제·일정) 근거로 내장 AI가 답. `kaist ai <프롬프트>`: 자료 없이 그냥 AI. 로컬 모델 기본, 설정 `aiApiKey`면 외부 모델.
   - `kaist doctor [과목] [--offline]`: 불변식 검사 (DB 변경 없음)
   - `kaist sync`는 파일도 받는다 (`--no-files`로 생략). 첫 전체 다운로드는 `--confirm-download`로 한 번 승인(완료됨). `kaist files [--new]`
 - 자동 sync: 작업 스케줄러 `KAIST daily sync`(매일 07:00, 놓치면 로그온 뒤 실행)가 `scripts/daily-sync.ps1`로 `sync --no-login`을 돌린다. 세션 만료·실패·새 변경은 Windows 알림, 요약 숫자만 `%LOCALAPPDATA%\kaist-cli\logs\daily-YYYYMM.log`. 등록·변경 `scripts/register-daily-sync.ps1 [-At HH:MM]`. ps1은 UTF-8 BOM으로 저장해야 한다(PS 5.1)
@@ -97,7 +106,7 @@ src/               CLI 본체 (S1부터)
 - 이번 학기 수강 과목만 대상으로 한다. 사용자 검색이나 다른 과목 탐색은 하지 않는다.
 - 요청은 간격을 두고 동시 2개 이하로 보낸다. 개발 중 반복 실행은 저장한 샘플로 하고, 실제 서버 요청은 최소로 한다.
 - **WS 토큰을 쓰지 않는다.** `launch.php`, `webservice/rest`, `tool_mobile_*` 호출 코드를 넣지 않는다.
-- 2단계 인증을 우회하지 않는다. 비밀번호를 묻거나 저장하거나 자동 입력하지 않는다. 로그인은 매번 새 브라우저 컨텍스트로 한다.
+- 2단계 인증을 우회하지 않는다(폰 승인은 사용자가 한다). **비밀번호는 묻거나 저장하거나 자동 입력하지 않는다** — 간편 로그인은 아이디만 채운다(KAIST 정보보안지침 제75조①7호). 로그인은 매번 새(메모리 전용) 브라우저 컨텍스트로 한다. 프로그램이 넘기는 화면은 로그인 진행용 버튼(포털 로그인·간편 로그인·기기 등록 '등록 안함'·KLMS 로그인)뿐이고, 비밀번호 입력란·2단계 인증은 건드리지 않는다.
 - 다운로드가 막힌 자료와 스트리밍 영상은 받지 않는다. 받은 자료는 개인 학습용이며 공유 기능을 만들지 않는다.
 
 **코드**
