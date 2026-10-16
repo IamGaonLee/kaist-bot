@@ -724,6 +724,22 @@ program.command('ai')
     else console.log(out);
   }));
 
+program.command('ask')
+  .description('학교생활 질문에 로컬 자료(요약·과제·일정)를 근거로 답한다 (내장 AI)')
+  .argument('<질문>')
+  .option('--course <과목>', '특정 과목 자료도 포함')
+  .option('--json', 'JSON 출력')
+  .action(run(async (question: string, opts: { course?: string; json?: boolean }) => {
+    const { getAiProvider } = await import('./ai/provider.js');
+    const { gatherContext, CHAT_SYSTEM } = await import('./ai/context.js');
+    const context = gatherContext({ course: opts.course });
+    const p = await getAiProvider();
+    await p.ensureReady?.(status);
+    const out = await p.complete(CHAT_SYSTEM, `자료:\n${context}\n\n질문: ${question}`, { maxTokens: 500 });
+    if (opts.json) console.log(JSON.stringify({ provider: p.name, answer: out }, null, 2));
+    else console.log(out);
+  }));
+
 program.command('doctor')
   .description('불변식 검사: 파서가 KLMS 화면과 맞는지 (DB는 바꾸지 않음)')
   .argument('[과목]', '특정 과목만')

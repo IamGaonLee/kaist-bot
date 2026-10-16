@@ -4,8 +4,8 @@ import path from 'node:path';
 import { paths, ensureDir } from '../config.js';
 import type { AiProvider } from './provider.js';
 
-// 기본 모델(하드웨어 자동 선택 전까지): 한국어 되는 소형 GGUF
-export const DEFAULT_MODEL_URI = 'hf:bartowski/Qwen2.5-1.5B-Instruct-GGUF:Qwen2.5-1.5B-Instruct-Q4_K_M.gguf';
+// 기본 모델: 한국어 되는 중소형 GGUF(Qwen2.5-3B Q4, 약 2GB). 설정 aiModelUri로 바꿀 수 있다.
+export const DEFAULT_MODEL_URI = 'hf:bartowski/Qwen2.5-3B-Instruct-GGUF:Qwen2.5-3B-Instruct-Q4_K_M.gguf';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export class LocalProvider implements AiProvider {
@@ -35,7 +35,7 @@ export class LocalProvider implements AiProvider {
   private async session(system: string): Promise<{ session: any; ctx: any }> {
     await this.ensureReady();
     const nlc = await import('node-llama-cpp');
-    const ctx = await this.model.createContext({ contextSize: 4096 });
+    const ctx = await this.model.createContext({ contextSize: 8192 });
     const session = new nlc.LlamaChatSession({ contextSequence: ctx.getSequence(), systemPrompt: system });
     return { session, ctx };
   }
@@ -53,7 +53,7 @@ export class LocalProvider implements AiProvider {
   async completeJson<T = unknown>(system: string, user: string, schema: object, opts: { maxTokens?: number } = {}): Promise<T> {
     await this.ensureReady();
     const nlc = await import('node-llama-cpp');
-    const ctx = await this.model.createContext({ contextSize: 4096 });
+    const ctx = await this.model.createContext({ contextSize: 8192 });
     try {
       const grammar = await this.llama.createGrammarForJsonSchema(schema);
       const session = new nlc.LlamaChatSession({ contextSequence: ctx.getSequence(), systemPrompt: system });
