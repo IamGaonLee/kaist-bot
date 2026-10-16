@@ -5,32 +5,65 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
   <title>KAISTBOT</title>
   <style>
-    :root { --bg: #f7f8fa; --fg: #1a1a1a; --sub: #666; --accent: #1a56b0; --card: #fff; --line: #e3e6ea; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #1c1f24; --fg: #e8eaed; --sub: #9aa0a6; --accent: #6ea8ff; --card: #262a30; --line: #363b42; } }
+    :root { --bg: #f7f8fa; --fg: #1a1a1a; --sub: #666; --accent: #1a56b0; --card: #fff; --line: #e3e6ea; --ok: #1a7f37; --err: #c4320a; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #1c1f24; --fg: #e8eaed; --sub: #9aa0a6; --accent: #6ea8ff; --card: #262a30; --line: #363b42; --ok: #4caf50; --err: #ff6b4a; } }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: var(--bg); color: var(--fg); }
-    header { padding: 16px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+    header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
     header .logo { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
     header h1 { font-size: 15px; margin: 0; }
     header .ver { font-size: 11px; color: var(--sub); }
-    main { padding: 18px; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    main { padding: 20px 18px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; text-align: center; }
     .muted { color: var(--sub); font-size: 13px; }
-    #status { margin-top: 10px; font-size: 13px; min-height: 18px; color: var(--sub); white-space: pre-wrap; }
+    button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 11px 18px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .big-num { font-size: 44px; font-weight: 800; letter-spacing: 6px; margin: 14px 0; color: var(--accent); }
+    .title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 6px auto 12px; animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ok { color: var(--ok); } .err { color: var(--err); }
+    .hidden { display: none; }
+    .sites { margin-top: 10px; font-size: 12px; color: var(--sub); }
   </style>
 </head>
 <body>
   <header>
     <div class="logo">K</div>
-    <div>
-      <h1>KAISTBOT</h1>
-      <div class="ver" id="ver"></div>
-    </div>
+    <div><h1>KAISTBOT</h1><div class="ver" id="ver"></div></div>
   </header>
   <main>
-    <div class="card">
-      <div class="muted">앱이 실행 중입니다. 로그인·동기화는 다음 단계에서 붙습니다.</div>
-      <div id="status"></div>
+    <!-- 시작 -->
+    <div class="card" id="screen-idle">
+      <div class="title">학교 계정 로그인</div>
+      <div class="muted" id="idle-sub">아이디는 저장돼 있습니다. 로그인하면 폰 승인만 하면 됩니다.</div>
+      <div style="margin-top:16px"><button id="btn-login">로그인</button></div>
+    </div>
+    <!-- 로그인 중 -->
+    <div class="card hidden" id="screen-progress">
+      <div class="spinner"></div>
+      <div class="title">로그인 중…</div>
+      <div class="muted" id="progress-sub">학교 사이트에 연결하고 있습니다.</div>
+    </div>
+    <!-- 폰 승인 -->
+    <div class="card hidden" id="screen-approve">
+      <div class="title">📱 폰에서 승인해 주세요</div>
+      <div class="muted">KAIST 인증 앱에서 아래 번호를 선택해 승인하세요.</div>
+      <div class="big-num" id="auth-num">–</div>
+      <div class="muted">승인하면 자동으로 다음으로 넘어갑니다.</div>
+    </div>
+    <!-- 완료 -->
+    <div class="card hidden" id="screen-done">
+      <div class="title ok">✓ 로그인 완료</div>
+      <div class="muted" id="done-sub"></div>
+      <div class="sites" id="done-sites"></div>
+      <div style="margin-top:16px"><button id="btn-again">다시 로그인</button></div>
+    </div>
+    <!-- 실패 -->
+    <div class="card hidden" id="screen-fail">
+      <div class="title err">로그인 실패</div>
+      <div class="muted" id="fail-sub"></div>
+      <div style="margin-top:16px"><button id="btn-retry">다시 시도</button></div>
     </div>
   </main>
   <script src="renderer.js"></script>

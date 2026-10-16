@@ -4,6 +4,7 @@
 import { chromium, type Dialog, type Page } from 'playwright';
 import { LoginCancelledError, KaistError } from '../errors.js';
 import { cookiesFor, type BrowserCookie, type BrowserLoginOptions, type ChainLoginOptions, type ChainLoginResult, type LoginDriver, type LoginPage, type LoginStep } from './browser-login.js';
+import { loginFailureMessage } from './login-dialog.js';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -39,25 +40,11 @@ async function debugStage(page: Page, seen: Set<string>): Promise<void> {
   for (const e of info.els) console.error(`[login-debug]   <${e.tag} id="${e.id}" class="${e.cls}"> txt="${e.txt}" href="${e.href}" onclick="${e.onclick}" img="${e.img}"`);
 }
 
-/** 로그인 중 뜬 alert 문구 분류. 없으면 null(원문 짧게 보여줌). */
-function classifyLoginDialog(msg: string): string | null {
-  const m = msg || '';
-  if (/잠[겼금]|lock|정지|제한.*횟수|\d+회 이상/i.test(m)) return '계정이 잠겼거나 로그인 시도가 제한되었습니다';
-  if (/거[부절]|reject|승인.*(거|실패)/i.test(m)) return '폰에서 승인이 거부되었습니다';
-  if (/차단|block|비정상적인 접근/i.test(m)) return '접근이 차단되었습니다';
-  if (/중복|다른 곳|이미 로그인|duplicate/i.test(m)) return '다른 곳에서 로그인 중입니다';
-  if (/일치하지|불일치|mismatch/i.test(m)) return '인증 번호가 일치하지 않습니다';
-  if (/만료|시간.*초과|timeout|expire/i.test(m)) return '시간이 초과되었습니다';
-  if (/아이디|비밀번호|존재하지|확인해/i.test(m)) return '아이디 또는 비밀번호가 올바르지 않습니다';
-  return null;
-}
-
 /** page.on('dialog')로 실패를 잡는다. 반환한 getter가 에러를 주면 대기 루프가 멈춘다. */
 function watchDialogs(page: Page): () => KaistError | null {
   let err: KaistError | null = null;
   page.on('dialog', (d: Dialog) => {
-    const reason = classifyLoginDialog(d.message());
-    err = new KaistError('LOGIN_FAILED', `로그인이 중단됐습니다: ${reason ?? (d.message() || '알 수 없는 알림').slice(0, 100)}`);
+    err = new KaistError('LOGIN_FAILED', loginFailureMessage(d.message()));
     d.dismiss().catch(() => {});
   });
   return () => err;

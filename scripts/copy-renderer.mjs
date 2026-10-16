@@ -8,4 +8,9 @@ fs.mkdirSync(dst, { recursive: true });
 for (const f of fs.readdirSync(src)) {
   if (/\.(html|js|css|png|svg)$/.test(f)) fs.copyFileSync(path.join(src, f), path.join(dst, f));
 }
-console.log('renderer 복사 완료 →', path.relative(process.cwd(), dst));
+// tsc가 내보내지 않는 preload(.cjs)도 복사
+const appDst = path.join(process.cwd(), 'dist-electron', 'app');
+for (const f of ['login-preload.cjs', 'preload.cjs']) {
+  fs.copyFileSync(path.join(process.cwd(), 'app', f), path.join(appDst, f));
+}
+console.log('renderer·preload 복사 완료 →', path.relative(process.cwd(), appDst));

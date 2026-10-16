@@ -3,9 +3,13 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installElectronPlatform } from './platform-electron.js';
+import { getSavedId } from '../src/sso/account.js';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'KAISTBOT';
+
+installElectronPlatform();
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -21,12 +25,14 @@ function createWindow(): void {
     title: APP_NAME,
     show: false,
     webPreferences: {
-      preload: path.join(dir, 'preload.js'),
+      preload: path.join(dir, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
   win.removeMenu();
+  win.webContents.on('console-message', (_e, level, message, line, src) => console.log(`[renderer:${level}] ${message} (${src}:${line})`));
+  win.webContents.on('preload-error', (_e, p, err) => console.log('[preload-error]', p, err?.message));
   win.loadFile(path.join(dir, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win?.show());
   // 창을 닫아도 앱은 트레이에 남는다
@@ -61,5 +67,20 @@ if (!app.requestSingleInstanceLock()) {
   app.on('activate', () => createWindow());
 }
 
-// 렌더러 → 메인 핸들 (C1: 핑만)
-ipcMain.handle('app:info', () => ({ name: APP_NAME, version: app.getVersion(), electron: process.versions.electron }));
+// 렌더러 → 메인 핸들
+ipcMain.handle('app:info', () => ({ name: APP_NAME, version: app.getVersion(), electron: process.versions.electron, hasSavedId: !!getSavedId() }));
+
+// 로그인: 숨긴 창에서 진행, 상태는 'status'로 렌더러에 보낸다 (C2)
+ipcMain.handle('login', async () => {
+  const { loginAll } = await import('../src/sites/session.js');
+  const sendStatus = (msg: string) => win?.webContents.send('status', msg);
+  try {
+    const savedId = getSavedId();
+    const r = await loginAll({ headless: !!savedId, onStatus: sendStatus });
+    const failed = r.sites.filter(s => s.state !== 'ok');
+    return { ok: failed.length === 0, sites: r.sites };
+  } catch (e) {
+    const err = e as { code?: string; message?: string };
+    return { ok: false, error: { code: err.code ?? 'ERROR', message: err.message ?? String(e) } };
+  }
+});
