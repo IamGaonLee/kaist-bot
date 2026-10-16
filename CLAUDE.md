@@ -23,7 +23,8 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
   - D: 첫 실행 설정 마법사 — 계정·드라이브 폴더·구글(범위 분리: 캘린더 기본/Gmail 선택)·AI 모델.
   - E: 내장 AI(`src/ai/`) — 로컬 node-llama-cpp(Vulkan, 기본 Qwen2.5-3B Q4), `kaist ask`·앱 대화창(드라이브 자료 근거), 자기 API 키로 GPT·Claude·Gemini(OpenAI 호환). 일정 추출은 verifyEvent로 채점하되 로컬 제안은 자동 A 금지(전부 사용자 확인) → 잘못 자동 등록 0.
   - F: 홈페이지·설명서(`site/`, GitHub Pages), electron-builder NSIS(`npm run dist`, 로컬은 개발자 모드 필요), CI(`.github/workflows/` release·pages).
-- 다음: 미정 (카카오톡 연결·웹 서버 방식은 보류)
+- **v1.1.0 (2026-10-16, feature/ai-events→main):** AI 일정 제안(`kaist suggest`, 앱 "일정" 건별 승인·거절·취소), 앱 UI 개편(사이드바 레이아웃 1100×720, 홈 대시보드 `home:state`, 로그인 오버레이), 새 버전 감지(`app/update-check.ts`, GitHub 릴리스 latest, 자동 설치 없음), 질문 화면 모델·노력 선택(`aiUseExternal`·`aiEffort`), 외부 AI 호환층 400 자동 보정(`src/ai/openai.ts`, 프리셋 gpt-6-luna·claude-haiku-5-5·gemini-2.5-flash-lite), 설명서 외부 AI·팁 절, 모바일 검토 `docs/mobile-feasibility.md`(권고: 지금은 안 만듦)
+- 다음: 미정 (카카오톡 연결·웹 서버 방식·모바일 앱은 보류)
 
 ## 에이전트로 쓸 때 (학교생활 논의)
 

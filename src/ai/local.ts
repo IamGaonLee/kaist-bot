@@ -3,6 +3,7 @@
 import path from 'node:path';
 import { paths, ensureDir } from '../config.js';
 import type { AiProvider } from './provider.js';
+import { MODEL_CATALOG } from './models.js';
 
 // 기본 모델: 한국어 되는 중소형 GGUF(Qwen2.5-3B Q4, 약 2GB). 설정 aiModelUri로 바꿀 수 있다.
 export const DEFAULT_MODEL_URI = 'hf:bartowski/Qwen2.5-3B-Instruct-GGUF:Qwen2.5-3B-Instruct-Q4_K_M.gguf';
@@ -10,6 +11,7 @@ export const DEFAULT_MODEL_URI = 'hf:bartowski/Qwen2.5-3B-Instruct-GGUF:Qwen2.5-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export class LocalProvider implements AiProvider {
   readonly name = 'local';
+  readonly label: string;
   private uri: string;
   private llama: any = null;
   private model: any = null;
@@ -17,6 +19,8 @@ export class LocalProvider implements AiProvider {
 
   constructor(uri?: string) {
     this.uri = uri ?? DEFAULT_MODEL_URI;
+    // 표시용: 카탈로그 라벨이 있으면 그것, 아니면 파일 이름
+    this.label = (MODEL_CATALOG.find(m => m.uri === this.uri)?.label ?? (this.uri.split(/[:/\\]/).pop() ?? this.uri).replace(/\.gguf$/i, '')) + ' · 로컬';
   }
 
   async ensureReady(onStatus?: (m: string) => void): Promise<void> {

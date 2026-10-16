@@ -711,6 +711,20 @@ mail.command('alias')
     output(o.json, { aliases: m, rematched: changed }, d => `별칭 ${alias} → ${code} 저장. 저장된 메일 ${d.rematched}통의 과목 매핑이 바뀌었습니다.`);
   }));
 
+program.command('suggest')
+  .description('내장 AI가 공지에서 학사 일정 후보를 뽑아 제안 (등록하지 않음; 앱에서 확인 후 등록)')
+  .option('--all', '처리한 후보까지 포함해 미리보기(검증용)')
+  .option('--json', 'JSON 출력')
+  .action(run(async (opts: { all?: boolean; json?: boolean }) => {
+    requireSynced();
+    const { suggestEvents } = await import('./ai/events.js');
+    const s = await suggestEvents({ all: opts.all, onStatus: status });
+    output(opts.json, { suggestions: s }, d => d.suggestions.length === 0
+      ? '제안할 학사 일정 후보가 없습니다.'
+      : [`AI 제안 ${d.suggestions.length}건 (확인 후 등록하세요):`,
+        ...d.suggestions.map(x => `  [${x.grade}] ${x.date}${x.start ? ' ' + x.start : ''} ${x.course} ${({ exam: '시험', no_class: '휴강', online: '온라인', makeup: '보강' } as Record<string, string>)[x.kind] ?? x.kind}  "${x.quote.slice(0, 40)}"${x.reasons.length ? `  (확인: ${x.reasons.join(', ')})` : ''}`)].join('\n'));
+  }));
+
 program.command('ai')
   .description('내장 AI에게 묻기 (로컬 모델 기본, 설정에 API 키가 있으면 그 모델)')
   .argument('<프롬프트>', '질문/지시')

@@ -1,6 +1,6 @@
 // Electron 메인 프로세스 (KAISTBOT 앱 껍데기, C단계).
 // 트레이 상주, 단일 인스턴스, 메인 창. 로그인·sync는 뒤 단계에서 붙인다.
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification, dialog } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,8 @@ import { installElectronPlatform } from './platform-electron.js';
 import { getSavedId } from '../src/sso/account.js';
 import { hasGoogleToken, hasGmailScope, googleLogin } from '../src/google/oauth.js';
 import { loadSettings, saveSettings } from '../src/config.js';
+import { getMeta } from '../src/store/db.js';
+import { checkForUpdate, type UpdateInfo } from './update-check.js';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'KAISTBOT';
@@ -23,8 +25,12 @@ app.setAppUserModelId('com.gaonlee.kaistbot');
 function createWindow(): void {
   if (win) { win.show(); win.focus(); return; }
   win = new BrowserWindow({
-    width: 420,
-    height: 560,
+    // ChatGPT·Claude 데스크톱과 비슷한 기본 창(사이드바 + 본문). 작은 창에서도 쓰이도록 최소 크기만 제한
+    width: 1100,
+    height: 720,
+    minWidth: 820,
+    minHeight: 560,
+    backgroundColor: '#f5f6f8',
     title: APP_NAME,
     show: false,
     webPreferences: {
@@ -121,15 +127,44 @@ ipcMain.handle('login', async (_e, opts?: { saveId?: boolean; show?: boolean }) 
   }
 });
 
-// 대화: 로컬 자료를 근거로 내장 AI가 답한다 (E2)
-ipcMain.handle('ask', async (_e, question: string) => {
+// AI 일정 제안: 공지에서 후보를 뽑아 보여주고(등록 안 함), 사용자가 확인하면 등록
+ipcMain.handle('events:suggest', async (_e, opts?: { all?: boolean }) => {
   try {
-    const { getAiProvider } = await import('../src/ai/provider.js');
+    const { suggestEvents } = await import('../src/ai/events.js');
+    const suggestions = await suggestEvents({ all: !!(opts && opts.all), onStatus: (m: string) => win?.webContents.send('status', m) });
+    return { ok: true, suggestions };
+  } catch (e) {
+    const err = e as { message?: string };
+    return { ok: false, error: { message: err.message ?? String(e) } };
+  }
+});
+
+ipcMain.handle('events:register', async (_e, s: { candidateId: number; course: string; kind: string; date: string; start?: string; quote: string }) => {
+  try {
+    const { registerSuggestion } = await import('../src/ai/events.js');
+    const r = await registerSuggestion(s as never);
+    return { ok: true, id: r.event?.id ?? null };
+  } catch (e) {
+    const err = e as { code?: string; message?: string };
+    return { ok: false, error: { code: err.code, message: err.message ?? String(e) } };
+  }
+});
+
+ipcMain.handle('events:dismiss', async (_e, candidateId: number) => {
+  try { const { dismissSuggestion } = await import('../src/ai/events.js'); dismissSuggestion(candidateId); return { ok: true }; }
+  catch (e) { return { ok: false, error: { message: (e as { message?: string }).message } }; }
+});
+
+// 대화: 로컬 자료를 근거로 내장 AI가 답한다 (E2)
+ipcMain.handle('ask', async (_e, question: string, opts?: { effort?: 'low' | 'medium' | 'high' }) => {
+  try {
+    const { getAiProvider, EFFORT_MAX_TOKENS } = await import('../src/ai/provider.js');
     const { gatherContext, CHAT_SYSTEM } = await import('../src/ai/context.js');
+    const effort = (opts && opts.effort) ?? loadSettings().aiEffort ?? 'medium';
     const p = await getAiProvider();
     await p.ensureReady?.((m: string) => win?.webContents.send('status', m));
-    const answer = await p.complete(CHAT_SYSTEM, `자료:\n${gatherContext()}\n\n질문: ${question}`, { maxTokens: 500 });
-    return { ok: true, answer, provider: p.name };
+    const answer = await p.complete(CHAT_SYSTEM, `자료:\n${gatherContext()}\n\n질문: ${question}`, { maxTokens: EFFORT_MAX_TOKENS[effort], effort });
+    return { ok: true, answer, provider: p.name, model: p.label, effort };
   } catch (e) {
     const err = e as { message?: string };
     return { ok: false, error: { message: err.message ?? String(e) } };
@@ -155,22 +190,55 @@ ipcMain.handle('drive:pick', async () => {
 // AI 모델 선택 (설치 마법사 4단계)
 ipcMain.handle('ai:state', async () => {
   const { catalogWithState } = await import('../src/ai/models.js');
+  const { useExternal } = await import('../src/ai/provider.js');
   const s = loadSettings();
-  return { models: catalogWithState(s.aiModelUri), usingApiKey: !!s.aiApiKey, apiBaseUrl: s.aiBaseUrl ?? '', apiModel: s.aiModel ?? '' };
+  const models = catalogWithState(s.aiModelUri);
+  const ext = useExternal(s);
+  const cur = models.find(m => m.selected);
+  return {
+    models, hasApiKey: !!s.aiApiKey, usingApiKey: ext, apiBaseUrl: s.aiBaseUrl ?? '', apiModel: s.aiModel ?? '',
+    effort: s.aiEffort ?? 'medium',
+    currentLabel: ext ? `${s.aiModel ?? 'gpt-6-luna'} · 외부` : `${cur?.label ?? '로컬 모델'} · 로컬`,
+  };
 });
 
+// 마법사: 로컬 모델 선택(키는 지우지 않고 외부 사용만 끈다)
 ipcMain.handle('ai:setModel', async (_e, uri: string) => {
   const { resetAiProvider } = await import('../src/ai/provider.js');
-  saveSettings({ aiModelUri: uri, aiApiKey: undefined });
+  saveSettings({ aiModelUri: uri, aiUseExternal: false });
   await resetAiProvider();
   return { ok: true };
 });
 
 ipcMain.handle('ai:setApiKey', async (_e, opts: { apiKey: string; baseUrl?: string; model?: string }) => {
   const { resetAiProvider } = await import('../src/ai/provider.js');
-  saveSettings({ aiApiKey: opts.apiKey || undefined, aiBaseUrl: opts.baseUrl || undefined, aiModel: opts.model || undefined });
+  saveSettings({ aiApiKey: opts.apiKey || undefined, aiBaseUrl: opts.baseUrl || undefined, aiModel: opts.model || undefined, aiUseExternal: !!opts.apiKey });
   await resetAiProvider();
   return { ok: true };
+});
+
+// 대화창 모델 선택기: 로컬 카탈로그 중 하나 또는 외부(키 있을 때)
+ipcMain.handle('ai:select', async (_e, sel: { uri?: string; external?: boolean }) => {
+  const { resetAiProvider } = await import('../src/ai/provider.js');
+  if (sel.external) { if (!loadSettings().aiApiKey) return { ok: false, error: { message: '외부 AI는 설정에서 API 키를 먼저 넣어야 합니다.' } }; saveSettings({ aiUseExternal: true }); }
+  else if (sel.uri) saveSettings({ aiModelUri: sel.uri, aiUseExternal: false });
+  await resetAiProvider();
+  return { ok: true };
+});
+
+ipcMain.handle('ai:setEffort', (_e, effort: 'low' | 'medium' | 'high') => { saveSettings({ aiEffort: effort }); return { ok: true }; });
+
+// 일정 탭: 등록된 일정 목록(오늘 이후)과 취소(사용자가 누를 때만, confirmed)
+ipcMain.handle('events:list', async () => {
+  try {
+    const { listSchoolEvents } = await import('../src/events/register.js');
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    return { ok: true, events: listSchoolEvents({ from: today }) };
+  } catch (e) { return { ok: false, error: { message: (e as { message?: string }).message ?? String(e) } }; }
+});
+ipcMain.handle('events:cancel', async (_e, id: number) => {
+  try { const { updateSchoolEvent } = await import('../src/events/register.js'); await updateSchoolEvent(id, { cancel: true, confirmed: true }); return { ok: true }; }
+  catch (e) { return { ok: false, error: { message: (e as { message?: string }).message ?? String(e) } }; }
 });
 
 ipcMain.handle('ai:download', async () => {
@@ -184,6 +252,53 @@ ipcMain.handle('ai:download', async () => {
     const err = e as { message?: string };
     return { ok: false, error: { message: err.message ?? String(e) } };
   }
+});
+
+// 홈 화면: 저장된 세션 여부·신선도·다가오는 마감·시험/휴강. 모두 로컬 DB, 접속 없음.
+ipcMain.handle('home:state', async () => {
+  try {
+    const { siteStatuses } = await import('../src/sites/session.js');
+    const { listTasks } = await import('../src/store/queries.js');
+    const { listSchoolEvents } = await import('../src/events/register.js');
+    const now = Math.floor(Date.now() / 1000);
+    const lastSync = getMeta('last_sync_at');
+    const klms = siteStatuses().find(s => s.site === 'klms');
+    const tasks = listTasks({ now, withinSec: 14 * 86400 })
+      .filter(t => !t.removed)
+      .map(t => ({ cmid: t.cmid, course: t.course, courseName: t.courseName, name: t.name, dueKst: t.dueKst, hoursLeft: t.hoursLeft, submission: t.submission, needsReview: t.needsReview }));
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    const events = listSchoolEvents({ from: today })
+      .map(e => ({ id: e.id, course: e.course, kind: e.kind, title: e.title, date: e.date, startKst: e.startKst, location: e.location, confidence: e.confidence }));
+    return {
+      ok: true,
+      hasSavedId: !!getSavedId(),
+      sessionSaved: !!(klms && klms.saved),
+      lastSync,
+      lastSyncMinutesAgo: lastSync ? Math.round((Date.now() - Date.parse(lastSync)) / 60000) : null,
+      tasks, events,
+    };
+  } catch (e) {
+    return { ok: false, error: { message: (e as { message?: string }).message ?? String(e) } };
+  }
+});
+
+// 새 버전 감지: GitHub 릴리스(latest) 태그와 현재 버전 비교. 설치는 사용자가 받은 파일로 직접.
+let lastUpdate: UpdateInfo | null = null;
+let notifiedVersion: string | null = null;
+async function runUpdateCheck(): Promise<UpdateInfo> {
+  lastUpdate = await checkForUpdate(app.getVersion());
+  if (lastUpdate.available && lastUpdate.latest !== notifiedVersion) {
+    notifiedVersion = lastUpdate.latest;
+    notify('KAISTBOT 새 버전', `v${lastUpdate.latest}이 나왔습니다. 앱에서 "다운로드"를 누르세요.`);
+    win?.webContents.send('update', lastUpdate);
+  }
+  return lastUpdate;
+}
+ipcMain.handle('update:check', () => runUpdateCheck());
+ipcMain.handle('update:open', () => { if (lastUpdate?.url) shell.openExternal(lastUpdate.url); return { ok: true }; });
+app.whenReady().then(() => {
+  setTimeout(() => { runUpdateCheck().catch(() => { /* 오프라인 등은 무시 */ }); }, 8000);
+  setInterval(() => { runUpdateCheck().catch(() => { /* 무시 */ }); }, 6 * 3600e3);
 });
 
 ipcMain.handle('google:login', async (_e, opts?: { gmail?: boolean }) => {

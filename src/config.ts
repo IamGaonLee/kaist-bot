@@ -35,7 +35,13 @@ export interface Settings {
   aiApiKey?: string;
   aiBaseUrl?: string;
   aiModel?: string;
+  /** 키가 있어도 로컬을 쓰려면 false (대화창 모델 선택기). 기본: 키가 있으면 외부 */
+  aiUseExternal?: boolean;
+  /** 답변 노력(길이·추론). 로컬은 답변 길이 상한, 외부 추론 모델은 reasoning_effort */
+  aiEffort?: AiEffort;
 }
+
+export type AiEffort = 'low' | 'medium' | 'high';
 
 export function loadSettings(): Settings {
   const file = path.join(home, 'config.json');
