@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('kaist', {
   eventsDismiss: (id) => ipcRenderer.invoke('events:dismiss', id),
   setupState: () => ipcRenderer.invoke('setup:state'),
   pickDrive: () => ipcRenderer.invoke('drive:pick'),
+  useLocalDrive: () => ipcRenderer.invoke('drive:useLocal'),
   googleLogin: (opts) => ipcRenderer.invoke('google:login', opts),
   aiState: () => ipcRenderer.invoke('ai:state'),
   aiSetModel: (uri) => ipcRenderer.invoke('ai:setModel', uri),

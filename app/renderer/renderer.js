@@ -366,6 +366,7 @@ async function refreshWizard() {
   $('wz-login').textContent = st.hasSavedId ? '다시 로그인' : '로그인하고 아이디 저장';
   badge('st-drive', st.driveRootExists, st.driveRootExists ? '확인됨' : '폴더 확인 필요');
   $('wz-drive-path').textContent = st.driveRoot || '';
+  if (!st.driveRootExists && !$('wz-hint-1').textContent) hint(1, '이 폴더의 상위가 없습니다(구글 드라이브 미설치?). 동기화는 되지만 파일·요약 저장은 건너뜁니다. "폴더 선택" 또는 "PC 폴더 쓰기"를 눌러 주세요.');
   badge('st-google', st.hasGoogleToken, st.hasGoogleToken ? ('연결됨' + (st.hasGmail ? ' · 메일' : '')) : '필요');
   if (st.hasGmail) $('wz-gmail').checked = true;
   return st;
@@ -463,6 +464,11 @@ $('wz-drive').addEventListener('click', async () => {
   hint(1, '폴더를 선택하세요…');
   const r = await call(K.pickDrive);
   hint(1, r && r.ok ? '폴더 저장 완료.' : '폴더 선택 취소.');
+  refreshWizard();
+});
+$('wz-drive-local').addEventListener('click', async () => {
+  const r = await call(K.useLocalDrive);
+  hint(1, r && r.ok ? `PC 폴더로 설정했습니다: ${r.driveRoot}` : ('실패: ' + errMsg(r)));
   refreshWizard();
 });
 $('wz-google').addEventListener('click', async () => {

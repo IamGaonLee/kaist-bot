@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { installPlaywrightPlatform } from './platform.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import { KaistError, exitCodeOf } from './errors.js';
 import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
@@ -636,6 +638,7 @@ program.command('summary')
     const cache = loadCourses();
     if (!cache) throw new KaistError('NO_LOCAL_DATA', '로컬 과목 목록이 없습니다.');
     const { driveRoot } = loadSettings();
+    if (!fs.existsSync(path.dirname(driveRoot))) throw new KaistError('DRIVE_MISSING', `자료 폴더의 상위 ${path.dirname(driveRoot)}가 없습니다. Google Drive가 실행 중인지, 또는 config.json의 driveRoot(구글 드라이브 없이도 PC 폴더면 됩니다)를 확인해 주세요.`);
     const md = writeMarkdown(driveRoot, cache.semester.label, cache.courses.map(c => c.id), getMeta('last_sync_at')!);
     const pdf = o.pdf ? await renderPdfs(md.filter(f => /_(요약|과목정보|학교메일)\.md$/.test(f))) : { written: [], failed: [] };
     output(o.json, { markdown: md.length, pdf: pdf.written.length, failed: pdf.failed }, d =>

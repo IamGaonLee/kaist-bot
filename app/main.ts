@@ -180,6 +180,14 @@ ipcMain.handle('setup:state', () => ({
   driveRootExists: (() => { try { return fs.existsSync(path.dirname(loadSettings().driveRoot)); } catch { return false; } })(),
 }));
 
+// 구글 드라이브 데스크톱이 없을 때: 문서\KAIST를 자료 폴더로(폰에서는 안 보이지만 모든 기능 동작)
+ipcMain.handle('drive:useLocal', () => {
+  const root = path.join(app.getPath('documents'), 'KAIST');
+  try { fs.mkdirSync(root, { recursive: true }); } catch (e) { return { ok: false, error: { message: `폴더를 만들지 못했습니다: ${(e as Error).message}` } }; }
+  saveSettings({ driveRoot: root });
+  return { ok: true, driveRoot: root };
+});
+
 ipcMain.handle('drive:pick', async () => {
   const r = await dialog.showOpenDialog({ title: '드라이브(KAIST) 폴더 선택', properties: ['openDirectory', 'createDirectory'] });
   if (r.canceled || !r.filePaths[0]) return { ok: false };
