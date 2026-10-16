@@ -58,8 +58,27 @@
         <button id="wz-google">구글 승인</button>
       </div>
 
-      <div class="step" style="padding:10px 0">
-        <div class="muted" style="font-size:12px"><b>4. AI 모델</b> — 다음 업데이트에서 추가됩니다.</div>
+      <div class="step" id="step-ai" style="padding:10px 0">
+        <div><b>4. AI 모델</b> <span id="ai-badge" class="muted"></span></div>
+        <div class="muted" style="font-size:12px; margin:4px 0">대화·일정 추출에 쓸 모델. 로컬 모델은 내려받아 오프라인으로 돌아갑니다.</div>
+        <div id="ai-models"></div>
+        <label class="muted" style="font-size:12px; display:flex; gap:6px; align-items:center; margin-top:6px">
+          <input type="radio" name="aimodel" id="ai-ext" value="__ext__"> 외부 AI 사용(자기 API 키)
+        </label>
+        <div id="ai-ext-fields" class="hidden" style="margin:6px 0 0 20px">
+          <div style="display:flex; gap:5px; margin-bottom:6px">
+            <button type="button" class="ai-preset" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini" style="flex:1; background:transparent; color:var(--accent); border:1px solid var(--line); font-size:12px; padding:6px">GPT</button>
+            <button type="button" class="ai-preset" data-base="https://api.anthropic.com/v1" data-model="claude-3-5-haiku-latest" style="flex:1; background:transparent; color:var(--accent); border:1px solid var(--line); font-size:12px; padding:6px">Claude</button>
+            <button type="button" class="ai-preset" data-base="https://generativelanguage.googleapis.com/v1beta/openai" data-model="gemini-2.0-flash" style="flex:1; background:transparent; color:var(--accent); border:1px solid var(--line); font-size:12px; padding:6px">Gemini</button>
+          </div>
+          <input id="ai-key" placeholder="API 키" style="width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--fg); font:inherit; margin-bottom:5px">
+          <input id="ai-base" placeholder="Base URL (기본 https://api.openai.com/v1)" style="width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--fg); font:inherit; margin-bottom:5px">
+          <input id="ai-model" placeholder="모델명 (기본 gpt-4o-mini)" style="width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--fg); font:inherit">
+        </div>
+        <div style="margin-top:8px; display:flex; gap:6px">
+          <button id="ai-save" style="background:transparent; color:var(--accent); border:1px solid var(--line)">선택 저장</button>
+          <button id="ai-download">모델 받기</button>
+        </div>
       </div>
 
       <div style="text-align:center; margin-top:14px">

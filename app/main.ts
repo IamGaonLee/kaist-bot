@@ -152,6 +152,40 @@ ipcMain.handle('drive:pick', async () => {
   return { ok: true, driveRoot: r.filePaths[0] };
 });
 
+// AI 모델 선택 (설치 마법사 4단계)
+ipcMain.handle('ai:state', async () => {
+  const { catalogWithState } = await import('../src/ai/models.js');
+  const s = loadSettings();
+  return { models: catalogWithState(s.aiModelUri), usingApiKey: !!s.aiApiKey, apiBaseUrl: s.aiBaseUrl ?? '', apiModel: s.aiModel ?? '' };
+});
+
+ipcMain.handle('ai:setModel', async (_e, uri: string) => {
+  const { resetAiProvider } = await import('../src/ai/provider.js');
+  saveSettings({ aiModelUri: uri, aiApiKey: undefined });
+  await resetAiProvider();
+  return { ok: true };
+});
+
+ipcMain.handle('ai:setApiKey', async (_e, opts: { apiKey: string; baseUrl?: string; model?: string }) => {
+  const { resetAiProvider } = await import('../src/ai/provider.js');
+  saveSettings({ aiApiKey: opts.apiKey || undefined, aiBaseUrl: opts.baseUrl || undefined, aiModel: opts.model || undefined });
+  await resetAiProvider();
+  return { ok: true };
+});
+
+ipcMain.handle('ai:download', async () => {
+  const sendStatus = (msg: string) => win?.webContents.send('status', msg);
+  try {
+    const { getAiProvider } = await import('../src/ai/provider.js');
+    const p = await getAiProvider();
+    await p.ensureReady?.(sendStatus);
+    return { ok: true };
+  } catch (e) {
+    const err = e as { message?: string };
+    return { ok: false, error: { message: err.message ?? String(e) } };
+  }
+});
+
 ipcMain.handle('google:login', async (_e, opts?: { gmail?: boolean }) => {
   const sendStatus = (msg: string) => win?.webContents.send('status', msg);
   try {

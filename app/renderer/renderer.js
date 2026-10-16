@@ -20,6 +20,56 @@ async function refreshWizard() {
   return st;
 }
 function wzStatus(msg) { $('wz-status').textContent = msg || ''; }
+
+async function refreshAi() {
+  let st; try { st = await window.kaist.aiState(); } catch (e) { return; }
+  const box = $('ai-models');
+  box.innerHTML = '';
+  for (const m of st.models) {
+    const row = document.createElement('label');
+    row.className = 'muted';
+    row.style.cssText = 'font-size:12px; display:flex; gap:6px; align-items:flex-start; margin:4px 0';
+    const checked = m.selected && !st.usingApiKey ? 'checked' : '';
+    row.innerHTML = `<input type="radio" name="aimodel" value="${m.uri}" ${checked}> <span><b>${m.label}</b> · ${m.sizeGb}GB · ${m.license} ${m.downloaded ? '· <span class="ok">받음</span>' : ''}<br><span style="font-size:11px">${m.note}</span></span>`;
+    box.appendChild(row);
+  }
+  $('ai-ext').checked = st.usingApiKey;
+  $('ai-ext-fields').classList.toggle('hidden', !st.usingApiKey);
+  document.querySelectorAll('.ai-preset').forEach(b => b.addEventListener('click', () => {
+    $('ai-ext').checked = true;
+    $('ai-ext-fields').classList.remove('hidden');
+    $('ai-base').value = b.getAttribute('data-base');
+    $('ai-model').value = b.getAttribute('data-model');
+    $('ai-key').focus();
+  }));
+  if (st.apiBaseUrl) $('ai-base').value = st.apiBaseUrl;
+  if (st.apiModel) $('ai-model').value = st.apiModel;
+  $('ai-badge').textContent = st.usingApiKey ? '외부 AI' : (st.models.find(m => m.selected)?.downloaded ? '✓ 준비됨' : '모델 받기 필요');
+  // 외부 선택 토글
+  document.querySelectorAll('input[name=aimodel]').forEach(r => r.addEventListener('change', () => {
+    $('ai-ext-fields').classList.toggle('hidden', $('ai-ext').checked !== true);
+  }));
+}
+async function aiSave() {
+  const sel = document.querySelector('input[name=aimodel]:checked');
+  if (!sel) { wzStatus('모델을 고르세요.'); return; }
+  if (sel.value === '__ext__') {
+    const apiKey = $('ai-key').value.trim();
+    if (!apiKey) { wzStatus('API 키를 입력하세요.'); return; }
+    await window.kaist.aiSetApiKey({ apiKey, baseUrl: $('ai-base').value.trim(), model: $('ai-model').value.trim() });
+    wzStatus('외부 AI로 설정했습니다.');
+  } else {
+    await window.kaist.aiSetModel(sel.value);
+    wzStatus('로컬 모델을 설정했습니다. "모델 받기"로 내려받으세요.');
+  }
+  await refreshAi();
+}
+async function aiDownload() {
+  wzStatus('모델을 내려받는 중… (수 분 걸릴 수 있어요)');
+  let res; try { res = await window.kaist.aiDownload(); } catch (e) { res = { ok: false, error: { message: String(e) } }; }
+  wzStatus(res && res.ok ? 'AI 모델 준비 완료.' : ('모델 받기 실패: ' + ((res && res.error && res.error.message) || '')));
+  await refreshAi();
+}
 async function wizardLogin() {
   wzStatus('로그인 창이 뜹니다. 아이디를 입력하고 폰 승인을 해 주세요…');
   let res; try { res = await window.kaist.login({ saveId: true, show: true }); } catch (e) { res = { ok: false, error: { message: String(e) } }; }
@@ -98,7 +148,9 @@ if ($('wz-login')) $('wz-login').addEventListener('click', wizardLogin);
 if ($('wz-drive')) $('wz-drive').addEventListener('click', wizardDrive);
 if ($('wz-google')) $('wz-google').addEventListener('click', wizardGoogle);
 if ($('wz-done')) $('wz-done').addEventListener('click', () => show('idle'));
-if ($('btn-setup')) $('btn-setup').addEventListener('click', async () => { await refreshWizard(); show('wizard'); });
+if ($('ai-save')) $('ai-save').addEventListener('click', aiSave);
+if ($('ai-download')) $('ai-download').addEventListener('click', aiDownload);
+if ($('btn-setup')) $('btn-setup').addEventListener('click', async () => { await refreshWizard(); await refreshAi(); show('wizard'); });
 
 // 대화
 function chatAppend(who, text) {
@@ -139,6 +191,7 @@ if ($('chat-back')) $('chat-back').addEventListener('click', () => show(loggedIn
     if (window.kaist && window.kaist.onTriggerSync) window.kaist.onTriggerSync(() => { if (loggedIn) doSync(); });
     // 설정이 덜 됐으면 마법사부터
     const st = await refreshWizard();
+    await refreshAi();
     if (st && !(st.hasSavedId && st.hasGoogleToken)) show('wizard');
     else show('idle');
   } catch (e) { $('ver').textContent = 'init 오류'; }

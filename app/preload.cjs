@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('kaist', {
   setupState: () => ipcRenderer.invoke('setup:state'),
   pickDrive: () => ipcRenderer.invoke('drive:pick'),
   googleLogin: (opts) => ipcRenderer.invoke('google:login', opts),
+  aiState: () => ipcRenderer.invoke('ai:state'),
+  aiSetModel: (uri) => ipcRenderer.invoke('ai:setModel', uri),
+  aiSetApiKey: (opts) => ipcRenderer.invoke('ai:setApiKey', opts),
+  aiDownload: () => ipcRenderer.invoke('ai:download'),
   onStatus: (cb) => {
     const h = (_e, msg) => cb(msg);
     ipcRenderer.on('status', h);
