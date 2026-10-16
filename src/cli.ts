@@ -711,6 +711,19 @@ mail.command('alias')
     output(o.json, { aliases: m, rematched: changed }, d => `별칭 ${alias} → ${code} 저장. 저장된 메일 ${d.rematched}통의 과목 매핑이 바뀌었습니다.`);
   }));
 
+program.command('ai')
+  .description('내장 AI에게 묻기 (로컬 모델 기본, 설정에 API 키가 있으면 그 모델)')
+  .argument('<프롬프트>', '질문/지시')
+  .option('--json', 'JSON 출력')
+  .action(run(async (prompt: string, opts: { json?: boolean }) => {
+    const { getAiProvider } = await import('./ai/provider.js');
+    const p = await getAiProvider();
+    await p.ensureReady?.(status);
+    const out = await p.complete('너는 KAIST 학생을 돕는 조수야. 한국어로 간결하고 정확하게 답해.', prompt, { maxTokens: 400 });
+    if (opts.json) console.log(JSON.stringify({ provider: p.name, answer: out }, null, 2));
+    else console.log(out);
+  }));
+
 program.command('doctor')
   .description('불변식 검사: 파서가 KLMS 화면과 맞는지 (DB는 바꾸지 않음)')
   .argument('[과목]', '특정 과목만')

@@ -29,6 +29,12 @@ export function ensureDir(dir: string): void {
 export interface Settings {
   /** 드라이브 동기화 폴더 안의 루트. 기본 G:\내 드라이브\KAIST */
   driveRoot: string;
+  /** 로컬 AI 모델 GGUF (node-llama-cpp URI 또는 로컬 경로). 없으면 기본값 */
+  aiModelUri?: string;
+  /** 자기 API 키로 외부 모델 사용 (OpenAI 호환). 넣으면 로컬 대신 이 모델 */
+  aiApiKey?: string;
+  aiBaseUrl?: string;
+  aiModel?: string;
 }
 
 export function loadSettings(): Settings {
