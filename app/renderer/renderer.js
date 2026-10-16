@@ -154,7 +154,7 @@ function applyStatus(msg) {
   }
   if (busy === 'login') { $('auth-wait-text').textContent = msg; return; }
   if (busy === 'sync') { $('sync-step').textContent = msg; return; }
-  if (tab === 'settings') { const h = document.querySelector('.step.on .hint'); if (h) h.textContent = msg; return; }
+  if (tab === 'settings') { const h = $('wz-hint-' + step); if (h) h.textContent = msg; return; }
   if (tab === 'ai') $('chat-model-note').textContent = msg;
 }
 
@@ -220,24 +220,44 @@ async function refreshChatTools() {
   aiInfo = await call(K.aiState);
   if (!aiInfo || aiInfo.error) return;
   const sel = $('chat-model'); sel.innerHTML = '';
+  const src = aiInfo.source || (aiInfo.usingApiKey ? 'key' : 'local');
   for (const m of aiInfo.models) {
     const o = document.createElement('option'); o.value = 'local:' + m.uri;
     o.textContent = m.label.replace(/\s*\(.*\)$/, '') + (m.downloaded ? '' : ' · 받기 필요');
-    if (m.selected && !aiInfo.usingApiKey) o.selected = true;
+    if (m.selected && src === 'local') o.selected = true;
+    sel.appendChild(o);
+  }
+  // ChatGPT 플랜: 로그인돼 있으면 모델마다 한 줄, 아니면 안내 한 줄(비활성)
+  const cg = aiInfo.chatgpt || { loggedIn: false, models: [] };
+  if (cg.loggedIn && cg.models.length) {
+    for (const m of cg.models) {
+      const o = document.createElement('option'); o.value = 'chatgpt:' + m.slug;
+      o.textContent = `${m.name || m.slug} · ChatGPT 플랜`;
+      if (src === 'chatgpt' && m.slug === cg.model) o.selected = true;
+      sel.appendChild(o);
+    }
+  } else {
+    const o = document.createElement('option'); o.value = 'chatgpt:';
+    o.textContent = cg.loggedIn ? 'ChatGPT 플랜 (모델 목록 없음)' : 'ChatGPT 플랜 (설정에서 로그인)';
+    o.disabled = !cg.loggedIn;
+    if (src === 'chatgpt') o.selected = true;
     sel.appendChild(o);
   }
   const ext = document.createElement('option'); ext.value = 'external';
-  ext.textContent = aiInfo.hasApiKey ? `${aiInfo.apiModel || 'gpt-6-luna'} · 외부` : '외부 AI (설정에서 키 입력)';
+  ext.textContent = aiInfo.hasApiKey ? `${aiInfo.apiModel || 'gpt-6-luna'} · 외부(API 키)` : '외부 AI (설정에서 키 입력)';
   ext.disabled = !aiInfo.hasApiKey;
-  if (aiInfo.usingApiKey) ext.selected = true;
+  if (src === 'key') ext.selected = true;
   sel.appendChild(ext);
   effort = aiInfo.effort || 'medium';
   document.querySelectorAll('#chat-effort button').forEach(b => b.classList.toggle('on', b.dataset.v === effort));
-  $('chat-model-note').textContent = aiInfo.usingApiKey ? '질문 내용이 외부 서비스로 전송됩니다' : '로컬에서 실행 · 외부 전송 없음';
+  $('chat-model-note').textContent = src === 'chatgpt' ? 'Using ChatGPT plan · 질문 내용이 OpenAI로 전송됩니다' : src === 'key' ? '질문 내용이 외부 서비스로 전송됩니다' : '로컬에서 실행 · 외부 전송 없음';
+  $('chat-usage-link').style.display = src === 'chatgpt' ? '' : 'none';
 }
+$('chat-usage-link').addEventListener('click', e => { e.preventDefault(); call(K.chatgptUsage); });
 $('chat-model').addEventListener('change', async e => {
   const v = e.target.value;
-  const r = await call(K.aiSelect, v === 'external' ? { external: true } : { uri: v.slice(6) });
+  const sel = v === 'external' ? { external: true } : v.startsWith('chatgpt:') ? { chatgpt: true, model: v.slice(8) || undefined } : { uri: v.slice(6) };
+  const r = await call(K.aiSelect, sel);
   if (!r.ok) $('chat-model-note').textContent = errMsg(r);
   refreshChatTools();
 });
@@ -326,20 +346,17 @@ async function refreshEventList() {
 }
 $('ev-refresh').addEventListener('click', refreshEventList);
 
-// ---- 설정(마법사) ----
+// ---- 설정: 네 항목(계정·드라이브·구글·AI)을 한 화면에 전부 펼친다(마법사 이전/다음 없음). step은 "마지막으로 만진 항목"(상태 메시지 표시용)
 let step = 0;
 let aiReady = false;
 let aiSel = null;
 function setStep(n) {
   step = Math.max(0, Math.min(3, n));
   document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', Number(s.dataset.step) === step));
-  document.querySelectorAll('.steps i').forEach(i => i.classList.toggle('on', Number(i.dataset.step) === step));
-  $('wz-prev').disabled = step === 0;
-  $('wz-next').textContent = step === 3 ? '완료' : '다음 →';
-  $('content').scrollTop = 0;
+  const el = document.querySelector(`.step[data-step="${step}"]`);
+  if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
-$('wz-prev').addEventListener('click', () => setStep(step - 1));
-$('wz-next').addEventListener('click', () => { if (step === 3) showTab('home'); else setStep(step + 1); });
+document.querySelectorAll('.step').forEach(s => s.addEventListener('click', () => { step = Number(s.dataset.step); document.querySelectorAll('.step').forEach(x => x.classList.toggle('on', x === s)); }, true));
 const hint = (n, msg) => { $('wz-hint-' + n).textContent = msg || ''; };
 function badge(id, ok, text) { const b = $(id); b.className = 'badge ' + (ok ? 'badge--success' : 'badge--warning'); b.textContent = text; }
 async function refreshWizard() {
@@ -351,14 +368,24 @@ async function refreshWizard() {
   $('wz-drive-path').textContent = st.driveRoot || '';
   badge('st-google', st.hasGoogleToken, st.hasGoogleToken ? ('연결됨' + (st.hasGmail ? ' · 메일' : '')) : '필요');
   if (st.hasGmail) $('wz-gmail').checked = true;
-  const done = [st.hasSavedId, st.driveRootExists, st.hasGoogleToken, aiReady];
-  document.querySelectorAll('.steps i').forEach(i => { const n = Number(i.dataset.step); i.classList.toggle('done', n !== step && !!done[n]); });
   return st;
 }
 function selectAi(uri) {
   aiSel = uri;
   document.querySelectorAll('.radio-card').forEach(c => c.classList.toggle('on', c.dataset.uri === uri));
   $('ai-ext-fields').style.display = uri === '__ext__' ? '' : 'none';
+  $('ai-cg-fields').style.display = uri === '__chatgpt__' ? '' : 'none';
+}
+// ChatGPT 플랜 카드: 로그인 전/후 표시
+function renderChatgptCard(cg) {
+  const inEl = $('ai-cg-in'), outEl = $('ai-cg-out');
+  inEl.style.display = cg.loggedIn ? '' : 'none';
+  outEl.style.display = cg.loggedIn ? 'none' : '';
+  if (!cg.loggedIn) return;
+  $('ai-cg-who').textContent = `로그인됨${cg.email ? ' · ' + cg.email : ''} · Using ChatGPT plan`;
+  const sel = $('ai-cg-model'); sel.innerHTML = '';
+  if (!cg.models.length) { const o = document.createElement('option'); o.textContent = '모델 목록을 받지 못했습니다 (다시 로그인)'; o.value = ''; sel.appendChild(o); return; }
+  for (const m of cg.models) { const o = document.createElement('option'); o.value = m.slug; o.textContent = m.name || m.slug; if (m.slug === cg.model) o.selected = true; sel.appendChild(o); }
 }
 async function refreshAi() {
   const st = await call(K.aiState);
@@ -373,19 +400,41 @@ async function refreshAi() {
   if (st.apiBaseUrl) $('ai-base').value = st.apiBaseUrl;
   if (st.apiModel) $('ai-model').value = st.apiModel;
   const cur = st.models.find(m => m.selected);
-  selectAi(st.usingApiKey ? '__ext__' : (cur ? cur.uri : null));
-  aiReady = st.usingApiKey || !!(cur && cur.downloaded);
-  badge('st-ai', aiReady, st.usingApiKey ? '외부 AI' : (aiReady ? '준비됨' : '모델 받기 필요'));
-  $('ai-download').style.display = st.usingApiKey ? 'none' : '';
+  const src = st.source || (st.usingApiKey ? 'key' : 'local');
+  renderChatgptCard(st.chatgpt || { loggedIn: false, models: [] });
+  selectAi(src === 'key' ? '__ext__' : src === 'chatgpt' ? '__chatgpt__' : (cur ? cur.uri : null));
+  aiReady = src !== 'local' || !!(cur && cur.downloaded);
+  badge('st-ai', aiReady, src === 'key' ? '외부 AI' : src === 'chatgpt' ? 'ChatGPT 플랜' : (aiReady ? '준비됨' : '모델 받기 필요'));
+  $('ai-download').style.display = src === 'local' ? '' : 'none';
 }
 $('ai-ext-card').addEventListener('click', () => selectAi('__ext__'));
+$('ai-cg-card').addEventListener('click', () => selectAi('__chatgpt__'));
+$('ai-cg-login').addEventListener('click', async e => {
+  e.stopPropagation();
+  $('ai-cg-login').disabled = true; hint(3, '브라우저에서 ChatGPT 계정으로 계속하세요 (5분 안에)…');
+  const r = await call(K.chatgptLogin);
+  $('ai-cg-login').disabled = false;
+  if (!r.ok) { hint(3, errMsg(r)); return; }
+  // 첫 로그인 1회 안내(OpenAI UI 지침: "You're using your ChatGPT plan")
+  let seen = false; try { seen = localStorage.getItem('cg-plan-notice') === '1'; } catch { /* 무시 */ }
+  if (!seen) { hint(3, 'ChatGPT 플랜을 사용합니다. 이 앱의 AI 질문·일정 제안이 내 ChatGPT 플랜 한도에서 차감됩니다. 한도는 chatgpt.com 설정 → Usage에서 관리할 수 있어요.'); try { localStorage.setItem('cg-plan-notice', '1'); } catch { /* 무시 */ } }
+  else hint(3, `ChatGPT 연결 완료${r.email ? ' · ' + r.email : ''}.`);
+  refreshAi(); refreshChatTools();
+});
+$('ai-cg-logout').addEventListener('click', async e => { e.stopPropagation(); await call(K.chatgptLogout); hint(3, 'ChatGPT 연결을 해제했습니다. 로컬 모델을 씁니다.'); refreshAi(); refreshChatTools(); });
+$('ai-cg-usage').addEventListener('click', e => { e.stopPropagation(); call(K.chatgptUsage); });
+$('ai-cg-model').addEventListener('click', e => e.stopPropagation());
+$('ai-cg-model').addEventListener('change', async e => { e.stopPropagation(); if (e.target.value) { await call(K.aiSelect, { chatgpt: true, model: e.target.value }); refreshChatTools(); } });
 document.querySelectorAll('.ai-preset').forEach(b => b.addEventListener('click', e => {
   e.stopPropagation(); selectAi('__ext__');
   $('ai-base').value = b.dataset.base; $('ai-model').value = b.dataset.model; $('ai-key').focus();
 }));
 $('ai-save').addEventListener('click', async () => {
   if (!aiSel) { hint(3, '모델을 고르세요.'); return; }
-  if (aiSel === '__ext__') {
+  if (aiSel === '__chatgpt__') {
+    const r = await call(K.aiSelect, { chatgpt: true, model: $('ai-cg-model').value || undefined });
+    hint(3, r.ok ? 'ChatGPT 플랜으로 설정했습니다.' : errMsg(r));
+  } else if (aiSel === '__ext__') {
     const apiKey = $('ai-key').value.trim();
     if (!apiKey) { hint(3, 'API 키를 입력하세요.'); return; }
     await call(K.aiSetApiKey, { apiKey, baseUrl: $('ai-base').value.trim(), model: $('ai-model').value.trim() });

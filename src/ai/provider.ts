@@ -1,6 +1,7 @@
-// AI 공급자 추상화 (결정 8). 기본은 로컬(node-llama-cpp), 설정에 API 키가 있고 aiUseExternal이 꺼져 있지 않으면 외부 모델.
+// AI 공급자 추상화 (결정 8). 로컬(node-llama-cpp) / 자기 API 키(OpenAI 호환) / ChatGPT 플랜(Continue with ChatGPT) 중 설정(aiSource)으로 고른다.
 // 코어는 이 인터페이스만 쓴다. node-llama-cpp는 로컬 공급자에서만 동적 import(미사용 시 안 불러옴).
-import { loadSettings, type AiEffort } from '../config.js';
+import { loadSettings, type AiEffort, type AiSource, type Settings } from '../config.js';
+import { hasChatGptToken } from './chatgpt-auth.js';
 
 export interface CompleteOptions {
   maxTokens?: number;
@@ -26,8 +27,17 @@ export interface AiProvider {
 /** 노력 단계 → 답변 토큰 상한. 로컬 모델은 이것만 달라진다(추론 단계가 없음) */
 export const EFFORT_MAX_TOKENS: Record<AiEffort, number> = { low: 300, medium: 600, high: 1200 };
 
+/** 실제로 쓸 공급자. aiSource가 있으면 그것(조건이 안 맞으면 로컬로), 없으면 구버전 규칙(키 있고 aiUseExternal≠false → 키) */
+export function resolveAiSource(s: Settings = loadSettings(), hasChatgpt: () => boolean = () => hasChatGptToken()): AiSource {
+  if (s.aiSource === 'chatgpt') return hasChatgpt() ? 'chatgpt' : 'local';
+  if (s.aiSource === 'key') return s.aiApiKey ? 'key' : 'local';
+  if (s.aiSource === 'local') return 'local';
+  return s.aiApiKey && s.aiUseExternal !== false ? 'key' : 'local';
+}
+
+/** 자기 API 키(OpenAI 호환) 공급자를 쓰는지 (구버전 호환용 이름) */
 export function useExternal(s = loadSettings()): boolean {
-  return !!s.aiApiKey && s.aiUseExternal !== false;
+  return resolveAiSource(s) === 'key';
 }
 
 let current: AiProvider | null = null;
@@ -36,7 +46,13 @@ let current: AiProvider | null = null;
 export async function getAiProvider(): Promise<AiProvider> {
   if (current) return current;
   const s = loadSettings();
-  if (useExternal(s)) {
+  const src = resolveAiSource(s);
+  if (src === 'chatgpt') {
+    const { ChatGptProvider } = await import('./chatgpt.js');
+    const { chatGptState } = await import('./chatgpt-auth.js');
+    const model = s.aiChatgptModel ?? chatGptState().models[0]?.slug ?? 'gpt-5';
+    current = new ChatGptProvider(model);
+  } else if (src === 'key') {
     const { OpenAiProvider } = await import('./openai.js');
     current = new OpenAiProvider(s.aiApiKey!, s.aiBaseUrl, s.aiModel);
   } else {

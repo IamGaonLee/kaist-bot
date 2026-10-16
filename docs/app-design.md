@@ -47,6 +47,7 @@
    - 런타임 node-llama-cpp(JSON 스키마 강제). 모델 기본값은 하드웨어 감지로 자동 선택: CPU 16GB→Qwen3.5-4B Q4, 8GB→2B/Mi:dm Mini, GPU 8GB→9B, 12GB→Gemma 4 12B QAT. 배포 가능 라이선스(Apache/MIT)만. EXAONE·Kanana 제외.
    - CPU만이면 건당 수십 초라, 로컬 모델의 수집 보조는 07:00 배치에 붙이고 대화창은 응답이 느릴 수 있음을 알린다.
    - **AI 공급자 추상화:** 설정에서 사용자가 자기 API 키를 넣어 다른 모델(OpenAI 호환 엔드포인트, 자기 서버 등)을 붙일 수 있게 인터페이스를 둔다. 키를 넣으면 추출·대화에 그 모델을 쓴다(정확도↑, 대신 그 사용자의 선택으로 외부 전송). 기본은 로컬.
+   - **ChatGPT 플랜 로그인(2026-10-16 결정, v1.2.0):** 사용자 요청 "Codex·Claude 데스크톱처럼 계정 로그인으로". 조사 결과 OpenAI는 공식 "Sign in with ChatGPT"(developers.openai.com/siwc, 오픈소스·로컬 앱은 동적 client 등록으로 사전 승인 없이 Plus/Pro 플랜 사용 가능)가 있어 채택. 규칙: 콜백 `http://127.0.0.1:<port>/auth/callback`(localhost 금지), Responses API만(`backend-api` 금지), `store:false`·`stream:true`, temperature·max_output_tokens 등 불가. 오픈소스 조건을 위해 MIT LICENSE 추가. **Anthropic은 제3자 앱의 Claude.ai 로그인·Pro/Max 자격 경유를 약관으로 명시 금지(2026-01 서버 차단, 2026-02 명문화)** → Claude는 API 키만(Max/Team의 월 API 크레딧 안내). Codex CLI·Claude Code의 client ID 재사용은 하지 않는다.
    - 모델 확정 전, S6 학사 일정 후보 47건과 처리 결과를 정답으로 두고 후보 모델을 비교 평가한다. 핵심 지표: 잘못 자동 등록된 A등급 0건.
 
 9. **Electron 구조 (electron-port 조사, 실측 포함):**
