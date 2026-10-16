@@ -81,7 +81,11 @@
   - 설정이 덜 됐으면(아이디 미저장 또는 구글 토큰 없음) 시작 시 마법사. 3단계: ① 학교 계정(로그인 창 보이고 아이디 저장) ② 드라이브 폴더(폴더 대화상자 → config.json) ③ 구글 승인(캘린더 기본, Gmail 체크박스). AI 모델은 E단계 자리만.
   - 구글 OAuth 범위 분리(결정 7): `googleLogin(onStatus, {gmail})`. CLI는 `{gmail:true}`. `config.saveSettings`, main에 `setup:state`/`drive:pick`/`google:login` IPC, `login({saveId,show})`.
   - 실측: 마법사 3단계·배지·드라이브 폴더 선택 동작(시작 화면 "설정" 버튼으로 열어 확인). **완전 초기 상태(계정·구글 둘 다 없음)에서 처음부터 하는 흐름은 기존 인증을 깨지 않으려 미실측** — 자동 표시 로직·show:true 로그인·범위 분리는 코드에 있음.
-- **E. 로컬 LLM:** node-llama-cpp utilityProcess, 하드웨어 감지·모델 선택·다운로드, JSON 스키마로 후보의 인용·종류·날짜 원문 추출, 대화창(로컬 파일 근거), 자기 키 공급자 추상화. 완료 기준: S6 후보 47건 오프라인 추출에서 잘못 자동 등록된 A등급 0건, 대화창이 로컬 파일로 답함.
+- **E. 로컬 LLM — 완료 (2026-10-16):**
+  - E1 공급자 추상화: `src/ai/`(provider·local·openai·context). 로컬은 node-llama-cpp(동적 import, **Vulkan**이 Intel GPU로 자동 선택돼 추론 0.7~3.7s), JSON은 `createGrammarForJsonSchema`로 강제. 자기 API 키 넣으면 OpenAI 호환(결정 8). 모델 `%LOCALAPPDATA%\kaist-cli\models`, 기본 Qwen2.5-3B Q4.
+  - E2 대화: `kaist ask <질문>` + 앱 대화창. 드라이브 `_요약.md`를 컨텍스트로(6500자 제한, 창 8192). 실측: "이번 주 과제" 등에 로컬 자료 근거로 답. node-llama-cpp가 Electron 안에서도 로드됨. 소형 모델 한계로 복잡한 추론은 가끔 틀림(자기 키로 상위 모델).
+  - E3 추출 평가: 후보 81건(실제 12/아님 68)을 로컬 모델로 추출→verifyEvent 채점. 원시 2건이 잘못 A → **결정 8 게이트(로컬 제안은 자동 A 금지, 전부 B=사용자 확인) 적용 시 잘못 자동 등록 A = 0**(실측). 실제 일정 8~9/12 제안. `scripts/phase0/e3-extract-eval.ts`.
+  - 미결: 로컬 모델 추출을 sync에 자동 연결하는 것은 아직(현재는 평가로 규칙만 확인). 하드웨어별 모델 자동 선택은 기본 3B 고정으로 대체(설정 aiModelUri로 변경).
 - **F. 패키징·배포:** NSIS 설치 파일, 첫 실행 모델 다운로드, 둘째 계정 Gmail 미인증 시험, 서명 결정, 지인 1명 설치. 완료 기준: 지인이 설치해 사용.
 
 ## 조사 (Opus, 2026-10-16 완료) — `docs/research/`
