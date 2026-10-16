@@ -23,6 +23,10 @@ export interface LoginStep {
   startUrl: string;
   /** 로그인 완료 여부. 예외는 '아직 아님'으로 취급한다. */
   isLoggedIn(page: LoginPage): Promise<boolean>;
+  /** (선택) 매 대기 회마다 호출. 현재 화면에서 눌러야 할 버튼을 눌러 진행한다(아이디 입력·포털 로그인·기기 등록 등). 각 클릭은 페이지를 넘기므로 중복 클릭되지 않는다. */
+  prepare?(page: LoginPage): Promise<void>;
+  /** (선택) 로그인 페이지에서 사용자가 입력한 아이디를 읽는다(저장 옵션일 때만 단다). 없으면 null. */
+  captureId?(page: LoginPage): Promise<string | null>;
 }
 
 export interface ChainLoginOptions {
@@ -39,6 +43,8 @@ export interface ChainLoginResult {
   /** 단계별 성공 여부. 첫 단계 실패는 예외로 올린다 */
   ok: Record<string, boolean>;
   cookies: BrowserCookie[];
+  /** 첫 단계 captureId가 읽은 아이디 (저장 옵션일 때만) */
+  capturedId?: string;
 }
 
 export interface BrowserLoginOptions {

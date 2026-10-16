@@ -6,6 +6,7 @@ import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
 import { ensureSession } from './klms/session.js';
 import { loginAll, probeSite, siteStatuses } from './sites/session.js';
+import { forgetId } from './sso/account.js';
 import { dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
 import { listPortalNotices } from './sites/notices.js';
 import { listGrades, refreshGrades } from './sites/grades.js';
@@ -67,8 +68,11 @@ program.command('login')
   .description('세션을 확인하고, 만료됐으면 브라우저 창으로 로그인 (포털 → KLMS·ERP·생활관 연쇄, 폰 승인 1회)')
   .option('--force', '세션이 살아 있어도 다시 로그인')
   .option('--only <site>', '이 사이트만 로그인 (klms|portal|erp|kds)')
+  .option('--save-id', '이번 로그인에서 입력한 아이디를 저장(다음부터 아이디 자동 입력, 비밀번호는 저장 안 함)')
+  .option('--forget-id', '저장한 아이디 삭제')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { force?: boolean; only?: string; json?: boolean }) => {
+  .action(run(async (opts: { force?: boolean; only?: string; saveId?: boolean; forgetId?: boolean; json?: boolean }) => {
+    if (opts.forgetId) { forgetId(); if (!opts.force) { output(opts.json, { forgot: true }, () => '저장한 아이디를 삭제했습니다.'); return; } }
     if (opts.only && !(SITES as readonly string[]).includes(opts.only)) throw new KaistError('BAD_ARGS', `--only는 ${SITES.join('|')} 중 하나입니다.`);
     const only = opts.only as SiteId | undefined;
     const targets: SiteId[] = only ? [only] : [...SITES];
@@ -79,7 +83,7 @@ program.command('login')
       output(opts.json, { loggedIn: true, reused: true, sites: targets.map(site => ({ site, chained: false, state: 'ok' })) }, () => '이미 로그인되어 있습니다 (세션 재사용).');
       return;
     }
-    const r = await loginAll({ only, onStatus: status });
+    const r = await loginAll({ only, saveId: opts.saveId, onStatus: status });
     const failed = r.sites.filter(x => x.state !== 'ok');
     if (failed.length) process.exitCode = 1;
     output(opts.json, { loggedIn: failed.length === 0, reused: false, sites: r.sites }, d => [
