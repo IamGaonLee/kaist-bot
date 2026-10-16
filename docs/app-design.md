@@ -77,7 +77,10 @@
   - C3 앱 동기화: sync IPC(runSync), 드라이브 저장, PDF는 `electron-pdf.ts` printToPDF(실측 `_요약.pdf` 재생성). 트레이 "지금 동기화". CSS·md→HTML은 `src/files/pdf-html.ts`로 공유.
   - Windows 토스트 알림: 동작 확인(개발 상태에서도 `isSupported=true`, show 이벤트, 화면에 토스트 뜸 — 실측). 포장(F단계) 시 앱 아이콘·이름이 제대로 붙는다.
   - 구조: `tsconfig.electron.json`(src+app→dist-electron), `build:app`/`app` 스크립트. Playwright 미로드(앱은 Electron 어댑터만).
-- **D. 설정 마법사:** 첫 실행 — 계정, 구글 승인(캘린더 기본·Gmail 선택), 드라이브 폴더 선택, 모델 다운로드. 완료 기준: 새 설치에서 마법사만으로 동작까지.
+- **D. 설정 마법사 — 완료 (2026-10-16):**
+  - 설정이 덜 됐으면(아이디 미저장 또는 구글 토큰 없음) 시작 시 마법사. 3단계: ① 학교 계정(로그인 창 보이고 아이디 저장) ② 드라이브 폴더(폴더 대화상자 → config.json) ③ 구글 승인(캘린더 기본, Gmail 체크박스). AI 모델은 E단계 자리만.
+  - 구글 OAuth 범위 분리(결정 7): `googleLogin(onStatus, {gmail})`. CLI는 `{gmail:true}`. `config.saveSettings`, main에 `setup:state`/`drive:pick`/`google:login` IPC, `login({saveId,show})`.
+  - 실측: 마법사 3단계·배지·드라이브 폴더 선택 동작(시작 화면 "설정" 버튼으로 열어 확인). **완전 초기 상태(계정·구글 둘 다 없음)에서 처음부터 하는 흐름은 기존 인증을 깨지 않으려 미실측** — 자동 표시 로직·show:true 로그인·범위 분리는 코드에 있음.
 - **E. 로컬 LLM:** node-llama-cpp utilityProcess, 하드웨어 감지·모델 선택·다운로드, JSON 스키마로 후보의 인용·종류·날짜 원문 추출, 대화창(로컬 파일 근거), 자기 키 공급자 추상화. 완료 기준: S6 후보 47건 오프라인 추출에서 잘못 자동 등록된 A등급 0건, 대화창이 로컬 파일로 답함.
 - **F. 패키징·배포:** NSIS 설치 파일, 첫 실행 모델 다운로드, 둘째 계정 Gmail 미인증 시험, 서명 결정, 지인 1명 설치. 완료 기준: 지인이 설치해 사용.
 
