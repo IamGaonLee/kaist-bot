@@ -35,9 +35,13 @@
   <main>
     <!-- 시작 -->
     <div class="card" id="screen-idle">
-      <div class="title">학교 계정 로그인</div>
+      <div class="title">KAISTBOT</div>
       <div class="muted" id="idle-sub">아이디는 저장돼 있습니다. 로그인하면 폰 승인만 하면 됩니다.</div>
-      <div style="margin-top:16px"><button id="btn-login">로그인</button></div>
+      <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
+        <button id="btn-sync-idle">지금 동기화</button>
+        <button id="btn-login" style="background:transparent; color:var(--accent); border:1px solid var(--line);">로그인</button>
+      </div>
+      <div class="muted" style="margin-top:10px; font-size:11px;">세션이 만료됐으면 동기화가 안 되니 로그인하세요.</div>
     </div>
     <!-- 로그인 중 -->
     <div class="card hidden" id="screen-progress">
@@ -52,12 +56,23 @@
       <div class="big-num" id="auth-num">–</div>
       <div class="muted">승인하면 자동으로 다음으로 넘어갑니다.</div>
     </div>
-    <!-- 완료 -->
+    <!-- 완료 / 홈 -->
     <div class="card hidden" id="screen-done">
-      <div class="title ok">✓ 로그인 완료</div>
+      <div class="title ok">✓ 로그인됨</div>
       <div class="muted" id="done-sub"></div>
       <div class="sites" id="done-sites"></div>
-      <div style="margin-top:16px"><button id="btn-again">다시 로그인</button></div>
+      <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
+        <button id="btn-sync">지금 동기화</button>
+        <button id="btn-again" style="background:transparent; color:var(--accent); border:1px solid var(--line);">다시 로그인</button>
+      </div>
+      <div id="sync-result" class="sites" style="margin-top:14px; white-space:pre-wrap;"></div>
+    </div>
+
+    <!-- 동기화 중 -->
+    <div class="card hidden" id="screen-sync">
+      <div class="spinner"></div>
+      <div class="title">동기화 중…</div>
+      <div class="muted" id="sync-sub">KLMS·포털·생활관에서 수집하고 드라이브에 저장합니다.</div>
     </div>
     <!-- 실패 -->
     <div class="card hidden" id="screen-fail">

@@ -4,9 +4,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('kaist', {
   appInfo: () => ipcRenderer.invoke('app:info'),
   login: () => ipcRenderer.invoke('login'),
+  sync: () => ipcRenderer.invoke('sync'),
   onStatus: (cb) => {
     const h = (_e, msg) => cb(msg);
     ipcRenderer.on('status', h);
     return () => ipcRenderer.removeListener('status', h);
   },
+  onTriggerSync: (cb) => { ipcRenderer.on('trigger-sync', () => cb()); },
 });

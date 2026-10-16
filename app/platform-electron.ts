@@ -2,8 +2,10 @@
 // (Playwright는 불러오지 않는다 → 앱 번들에 playwright가 안 들어간다.)
 import { setLoginDriver } from '../src/sso/browser-login.js';
 import { electronLoginDriver } from './electron-login.js';
+import { setPdfRenderer } from '../src/files/pdf.js';
+import { electronPdfRenderer } from './electron-pdf.js';
 
 export function installElectronPlatform(): void {
   setLoginDriver(electronLoginDriver);
-  // PDF 렌더러(printToPDF)는 C3에서 추가
+  setPdfRenderer(electronPdfRenderer);
 }
