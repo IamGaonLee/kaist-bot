@@ -1,5 +1,5 @@
 // 로컬 마감 → 구글 "KLMS" 캘린더 (설계 9절, S4 결정)
-// - 마감 시각에 끝나는 30분 일정, 제목 "[과목명] 과제명", 알림은 마감 1일·3일 전
+// - 마감 시각 한 점(시작=끝) 일정 (2026-10-16 사용자 결정, 이전에는 마감에 끝나는 30분 일정), 제목 "[과목명] 과제명", 알림은 마감 1일·3일 전
 // - 제출한 과제는 제목 앞 ✓, 알림 없음
 // - needs_review 과제는 새로 등록하지 않음(이미 있으면 ⚠ 표시), 사라진 과제(활동 삭제 또는 이번 학기 과제 목록에 없음)는 지우지 않고 제목에 표시
 // - 비공개 속성 kaistCmid로 중복 방지
@@ -9,8 +9,7 @@ import { getMeta, openDb, setMeta } from '../store/db.js';
 import { formatKst } from '../util/time.js';
 
 export const CALENDAR_NAME = 'KLMS';
-const EVENT_MINUTES = 30;
-/** 마감 기준 알림(분). 구글 알림은 일정 시작 기준이라 30분을 빼서 넣는다 */
+/** 마감 기준 알림(분). 일정 시작이 곧 마감이라 그대로 넣는다 */
 const REMIND_BEFORE_DUE = [24 * 60, 72 * 60];
 
 export async function ensureCalendar(): Promise<string> {
@@ -45,11 +44,11 @@ export function eventFor(t: TaskRow, lastSync: string): GEvent {
   return {
     summary: `${prefix}[${t.course_name}] ${label}`,
     description: desc,
-    start: { dateTime: iso(t.due! - EVENT_MINUTES * 60), timeZone: 'Asia/Seoul' },
+    start: { dateTime: iso(t.due!), timeZone: 'Asia/Seoul' },
     end: { dateTime: iso(t.due!), timeZone: 'Asia/Seoul' },
     reminders: submitted || t.removed_at
       ? { useDefault: false, overrides: [] }
-      : { useDefault: false, overrides: REMIND_BEFORE_DUE.map(m => ({ method: 'popup' as const, minutes: m - EVENT_MINUTES })) },
+      : { useDefault: false, overrides: REMIND_BEFORE_DUE.map(m => ({ method: 'popup' as const, minutes: m })) },
     extendedProperties: { private: { kaist: '1', kaistCmid: String(t.cmid) } },
   };
 }
