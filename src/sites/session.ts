@@ -1,11 +1,11 @@
 // 사이트별 세션 프로브와 연쇄 로그인. 만료 신호는 S8a 검증 결과 (docs/portal-design.md).
-import type { Cookie } from 'playwright';
 import { KaistError } from '../errors.js';
-import { chainLogin, cookiesFor, type LoginStep } from '../sso/browser-login.js';
+import { chainLogin, cookiesFor, type BrowserCookie, type LoginPage, type LoginStep } from '../sso/browser-login.js';
+import { getSavedId, saveId } from '../sso/account.js';
 import { KlmsHttp } from '../klms/http.js';
 import { probe as probeKlms } from '../klms/session.js';
 import { SessionStore, SITES, type SessionFile, type SiteId, type StoredCookie } from '../klms/session-store.js';
-import { KLMS_BASE, KLMS_HOST, URLS, browserLoggedInCheck } from '../klms/site.js';
+import { KLMS_BASE, KLMS_HOST, URLS, USER_AGENT, browserLoggedInCheck } from '../klms/site.js';
 import { SiteHttp, type SiteResponse } from './http.js';
 import { BROWSER_CHECKS, ERP_BASE_FORM, SITE_DEFS, type PortalSite } from './sites.js';
 
@@ -87,10 +87,10 @@ export function siteStatuses(store = new SessionStore()): SiteStatus[] {
 
 const HOST: Record<SiteId, string> = { klms: KLMS_HOST, portal: SITE_DEFS.portal.host, erp: SITE_DEFS.erp.host, kds: SITE_DEFS.kds.host };
 
-const toStored = (c: Cookie): StoredCookie => ({ name: c.name, value: c.value, domain: c.domain.replace(/^\./, ''), path: c.path, expires: c.expires });
+const toStored = (c: BrowserCookie): StoredCookie => ({ name: c.name, value: c.value, domain: c.domain.replace(/^\./, ''), path: c.path, expires: c.expires });
 
 /** 브라우저 쿠키 → 사이트별 세션 (사이트 자기 호스트만, SSO·상위 도메인 쿠키 제외) */
-export function splitCookies(cookies: Cookie[], now = new Date().toISOString()): Partial<Record<SiteId, SessionFile>> {
+export function splitCookies(cookies: BrowserCookie[], now = new Date().toISOString()): Partial<Record<SiteId, SessionFile>> {
   const out: Partial<Record<SiteId, SessionFile>> = {};
   for (const site of SITES) {
     const own = cookiesFor(cookies, HOST[site]);
@@ -106,6 +106,68 @@ const STEPS: Record<SiteId, LoginStep> = {
   kds: { id: 'kds', startUrl: SITE_DEFS.kds.loginUrl, isLoggedIn: BROWSER_CHECKS.kds },
 };
 
+// 로그인 화면을 단계마다 넘긴다(모든 사이트가 같은 sso.kaist.ac.kr 로그인 페이지로 모인다). 비밀번호는 다루지 않는다.
+// 1) 포털 첫 화면 → SSO 이동, 2) SSO 간편 로그인 아이디 입력+로그인(아이디 있을 때만), 3) 기기 등록 → '등록 안함'(임시 기기 미등록),
+// 4) KLMS 로그인 페이지 → SSO 로그인 버튼. 2단계 인증은 사용자가 폰으로.
+// dataset.kaistClicked로 같은 DOM(AJAX) 재클릭을 막는다(페이지가 넘어가면 새 DOM이라 초기화).
+const advanceLogin = (fillId: string | null) => (page: LoginPage): Promise<void> =>
+  page.evaluate((loginId: string | null) => {
+    const vis = (el: Element | null): el is HTMLElement => !!el && (el as HTMLElement).offsetParent !== null;
+    const clickOnce = (el: HTMLElement) => { if (el.dataset.kaistClicked) return; el.dataset.kaistClicked = '1'; el.click(); };
+    const portalBtn = document.querySelector('#btn-sso-login');
+    if (vis(portalBtn)) { clickOnce(portalBtn); return; }
+    const idEl = document.querySelector('#login_id_mfa') as HTMLInputElement | null;
+    const loginBtn = document.querySelector('#loginTab01 a.btn_login');
+    if (vis(idEl) && vis(loginBtn)) {
+      if (loginId && !loginBtn.dataset.kaistClicked) {
+        idEl.value = loginId;
+        idEl.dispatchEvent(new Event('input', { bubbles: true }));
+        idEl.dispatchEvent(new Event('change', { bubbles: true }));
+        clickOnce(loginBtn);
+      }
+      return;
+    }
+    if (location.pathname.includes('/device/')) {
+      const skip = [...document.querySelectorAll('a.btn_easy')].find(a => (a as HTMLElement).innerText.trim() === '등록 안함') as HTMLElement | undefined;
+      if (vis(skip ?? null)) clickOnce(skip!);
+      return;
+    }
+    if (location.host === 'klms.kaist.ac.kr' && location.pathname.startsWith('/login/')) {
+      const a = [...document.querySelectorAll('a')].find(el => {
+        const alt = el.querySelector('img')?.getAttribute('alt')?.trim();
+        return alt === '로그인' || (el.getAttribute('href') || '').includes('agt_url=');
+      }) as HTMLElement | undefined;
+      if (vis(a ?? null)) clickOnce(a!);
+    }
+  }, fillId);
+
+const captureSimpleId = (page: LoginPage): Promise<string | null> =>
+  page.evaluate(() => {
+    const el = document.querySelector('#login_id_mfa') as HTMLInputElement | null;
+    return el && el.value ? el.value : null;
+  });
+
+// 창을 숨겼을 때 앱 화면에 띄울 문구. 2단계 인증 화면이면 인증 번호와 남은 시간을 보여준다(폰에서 맞춰 승인).
+const describeLogin = (page: LoginPage): Promise<string | null> =>
+  page.evaluate(() => {
+    let nums = [...document.querySelectorAll('.auth_number')].filter(e => (e as HTMLElement).offsetParent !== null)
+      .map(e => (e as HTMLElement).innerText.trim()).join('').replace(/\s+/g, '');
+    // 번호가 화면에 두 번 나와 이어붙는 경우(예: "65"가 "6565") 앞 절반만 쓴다
+    if (nums.length % 2 === 0 && nums.slice(0, nums.length / 2) === nums.slice(nums.length / 2)) nums = nums.slice(0, nums.length / 2);
+    // 번호만 (카운트다운은 매초 바뀌어 메시지가 도배되므로 넣지 않는다 — 앱에서는 따로 표시)
+    return nums ? `폰에서 로그인을 승인해 주세요. 인증 번호: ${nums}` : null;
+  });
+
+/** 모든 단계에 자동 넘김(advance)을 달고, 첫 단계에만 저장용 아이디 캡처를 단다 */
+function withLogin(step: LoginStep, fillId: string | null, first: boolean, saveId: boolean): LoginStep {
+  return {
+    ...step,
+    prepare: advanceLogin(fillId),
+    describe: describeLogin,
+    ...(first && saveId ? { captureId: captureSimpleId } : {}),
+  };
+}
+
 export interface LoginAllResult {
   /** 사이트별: 브라우저 연쇄 성공 여부와 브라우저를 닫은 뒤 프로브 결과 */
   sites: { site: SiteId; chained: boolean; state: ProbeState }[];
@@ -115,13 +177,17 @@ export interface LoginAllResult {
  * 로그인 창 1개: 포털에서 사용자가 로그인(2단계 인증 1회) → KLMS·ERP·kds 연쇄.
  * 한 사이트가 실패해도 나머지는 저장한다. only를 주면 그 사이트만(포털 경유가 필요한 ERP는 포털부터).
  */
-export async function loginAll(opts: { only?: SiteId; onStatus?: (m: string) => void; store?: SessionStore } = {}): Promise<LoginAllResult> {
+export async function loginAll(opts: { only?: SiteId; fillId?: string; saveId?: boolean; headless?: boolean; onStatus?: (m: string) => void; store?: SessionStore } = {}): Promise<LoginAllResult> {
   const store = opts.store ?? new SessionStore();
   const order: SiteId[] = opts.only === 'klms' ? ['klms']
     : opts.only === 'kds' ? ['portal', 'kds']
     : opts.only ? ['portal', opts.only].filter((v, i, a) => a.indexOf(v) === i) as SiteId[]
     : ['portal', 'klms', 'erp', 'kds'];
-  const r = await chainLogin({ steps: order.map(s => STEPS[s]), onStatus: opts.onStatus });
+  // 저장된 아이디가 있으면 자동 입력(결정 2, 기본은 저장 안 함). 비밀번호는 다루지 않는다.
+  const fillId = opts.fillId ?? getSavedId();
+  const steps = order.map((s, i) => withLogin(STEPS[s], fillId, i === 0, !!opts.saveId));
+  const r = await chainLogin({ steps, headless: opts.headless, userAgent: USER_AGENT, onStatus: opts.onStatus });
+  if (opts.saveId && r.capturedId) saveId(r.capturedId);
   const split = splitCookies(r.cookies);
   const targets = opts.only ? [opts.only] : order;
   for (const site of targets) {

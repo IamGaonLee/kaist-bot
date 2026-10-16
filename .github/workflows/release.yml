@@ -1,0 +1,26 @@
+name: release
+# 태그(vX.Y.Z)를 올리면 Windows 설치 파일을 빌드해 릴리스에 올린다. (CI 러너는 심링크 권한이 있어 로컬과 달리 빌드됨)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build:app
+      - run: npx electron-builder --win nsis --publish never
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          generate_release_notes: true

@@ -29,6 +29,12 @@ export function ensureDir(dir: string): void {
 export interface Settings {
   /** 드라이브 동기화 폴더 안의 루트. 기본 G:\내 드라이브\KAIST */
   driveRoot: string;
+  /** 로컬 AI 모델 GGUF (node-llama-cpp URI 또는 로컬 경로). 없으면 기본값 */
+  aiModelUri?: string;
+  /** 자기 API 키로 외부 모델 사용 (OpenAI 호환). 넣으면 로컬 대신 이 모델 */
+  aiApiKey?: string;
+  aiBaseUrl?: string;
+  aiModel?: string;
 }
 
 export function loadSettings(): Settings {
@@ -40,3 +46,18 @@ export function loadSettings(): Settings {
   }
   return { driveRoot: process.env.KAIST_DRIVE_ROOT ?? user.driveRoot ?? 'G:\\내 드라이브\\KAIST' };
 }
+
+const configFile = () => path.join(home, 'config.json');
+
+/** config.json의 일부를 병합 저장 (없던 키는 추가) */
+export function saveSettings(patch: Partial<Settings>): void {
+  let cur: Partial<Settings> = {};
+  if (fs.existsSync(configFile())) {
+    try { cur = JSON.parse(fs.readFileSync(configFile(), 'utf8').replace(/^\uFEFF/, '')) as Partial<Settings>; } catch { /* 새로 쓴다 */ }
+  }
+  ensureDir(home);
+  fs.writeFileSync(configFile(), JSON.stringify({ ...cur, ...patch }, null, 2));
+}
+
+/** 설정 파일이 있는지 (첫 실행 판별 보조) */
+export const hasConfig = () => fs.existsSync(configFile());

@@ -1,14 +1,34 @@
-// SSO 로그인 창 (사이트 무관). 사용자가 직접 입력·승인하고, 우리는 완료만 판별한다.
-// 비밀번호는 다루지 않으며, 매번 새 컨텍스트를 쓴다(브라우저 프로필/자동완성 없음).
-// 연쇄: 첫 단계에서 사용자가 로그인(2단계 인증 1회)하면, 같은 컨텍스트로 다음 사이트 주소로 이동만 한다(폼 조작·클릭 없음).
-import { chromium, type Cookie, type Page } from 'playwright';
-import { LoginCancelledError, KaistError } from '../errors.js';
+// SSO 로그인 창 (사이트 무관) — 포트 인터페이스.
+// 실제 창은 플랫폼 드라이버가 연다(CLI는 Playwright, 앱은 Electron). 코어는 이 포트만 쓴다.
+// 비밀번호는 다루지 않는다. 드라이버는 매번 새 컨텍스트(프로필·자동완성 없음)를 쓴다.
+import { KaistError } from '../errors.js';
+
+/** 브라우저 쿠키 (플랫폼 무관 데이터). Playwright/Electron 쿠키가 이 모양을 만족한다. */
+export interface BrowserCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+}
+
+/** 로그인 페이지에서 스크립트를 실행하는 핸들. 콜백은 페이지 컨텍스트(브라우저)에서 돈다. */
+export interface LoginPage {
+  evaluate<R>(fn: () => R | Promise<R>): Promise<R>;
+  evaluate<R, A>(fn: (arg: A) => R | Promise<R>, arg: A): Promise<R>;
+}
 
 export interface LoginStep {
   id: string;
   startUrl: string;
   /** 로그인 완료 여부. 예외는 '아직 아님'으로 취급한다. */
-  isLoggedIn(page: Page): Promise<boolean>;
+  isLoggedIn(page: LoginPage): Promise<boolean>;
+  /** (선택) 매 대기 회마다 호출. 현재 화면에서 눌러야 할 버튼을 눌러 진행한다(아이디 입력·포털 로그인·기기 등록 등). 각 클릭은 페이지를 넘기므로 중복 클릭되지 않는다. */
+  prepare?(page: LoginPage): Promise<void>;
+  /** (선택) 현재 화면을 사람이 볼 문구로. 창을 숨겼을 때 2단계 인증 번호 등을 앱 화면에 띄우는 용도. 바뀔 때만 onStatus로 나간다. */
+  describe?(page: LoginPage): Promise<string | null>;
+  /** (선택) 로그인 페이지에서 사용자가 입력한 아이디를 읽는다(저장 옵션일 때만 단다). 없으면 null. */
+  captureId?(page: LoginPage): Promise<string | null>;
 }
 
 export interface ChainLoginOptions {
@@ -18,103 +38,54 @@ export interface ChainLoginOptions {
   timeoutMs?: number;
   /** 연쇄 단계마다 대기 시간 */
   chainTimeoutMs?: number;
+  /** 창을 숨긴다(사용자는 앱 화면만 본다). 자동 넘김이 되므로 상호작용이 필요 없을 때. */
+  headless?: boolean;
+  /** 브라우저 User-Agent (headless 티를 없애려면 일반 UA) */
+  userAgent?: string;
   onStatus?(message: string): void;
 }
 
 export interface ChainLoginResult {
   /** 단계별 성공 여부. 첫 단계 실패는 예외로 올린다 */
   ok: Record<string, boolean>;
-  cookies: Cookie[];
+  cookies: BrowserCookie[];
+  /** 첫 단계 captureId가 읽은 아이디 (저장 옵션일 때만) */
+  capturedId?: string;
 }
 
 export interface BrowserLoginOptions {
   startUrl: string;
-  isLoggedIn(page: Page): Promise<boolean>;
+  isLoggedIn(page: LoginPage): Promise<boolean>;
   /** 돌려줄 쿠키의 도메인 (정확히 일치하거나 하위 도메인) */
   cookieDomain: string;
   /** 브라우저를 닫기 전에 쿠키가 브라우저 밖에서도 통하는지 확인 */
-  verify(cookies: Cookie[]): Promise<boolean>;
+  verify(cookies: BrowserCookie[]): Promise<boolean>;
   timeoutMs?: number;
   onStatus?(message: string): void;
 }
 
-// 로그인 중 이런 문구가 보이면 사용자에게 알리고 멈춰야 한다
-const SUSPICIOUS = /captcha|recaptcha|자동화|비정상적인 접근|접근이 차단|access denied|request blocked/i;
+/** 로그인 창을 여는 플랫폼 드라이버 */
+export interface LoginDriver {
+  chainLogin(opts: ChainLoginOptions): Promise<ChainLoginResult>;
+  browserLogin(opts: BrowserLoginOptions): Promise<BrowserCookie[]>;
+}
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-export const cookiesFor = (cookies: Cookie[], domain: string) => cookies.filter(c => {
+export const cookiesFor = (cookies: BrowserCookie[], domain: string) => cookies.filter(c => {
   const d = c.domain.replace(/^\./, '');
   return d === domain || d.endsWith('.' + domain);
 });
 
-/** 완료될 때까지 기다린다. 창이 닫히면 취소, 차단 문구면 중단 */
-async function waitLoggedIn(page: Page, step: LoginStep, timeoutMs: number, isClosed: () => boolean): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (isClosed()) throw new LoginCancelledError('closed');
-    if (Date.now() > deadline) return false;
-    const text = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
-    const hit = text.match(SUSPICIOUS);
-    if (hit) throw new KaistError('LOGIN_BLOCKED', `로그인 화면에 "${hit[0]}" 문구가 보입니다. 자동화 차단일 수 있어 중단합니다.`);
-    if (await step.isLoggedIn(page).catch(() => false)) return true;
-    await sleep(1000);
-  }
+let driver: LoginDriver | null = null;
+
+/** 플랫폼 진입점에서 1회 호출 (src/platform.ts) */
+export function setLoginDriver(d: LoginDriver): void {
+  driver = d;
 }
 
-export async function chainLogin(opts: ChainLoginOptions): Promise<ChainLoginResult> {
-  const { timeoutMs = 5 * 60_000, chainTimeoutMs = 60_000, onStatus = () => {} } = opts;
-  const [first, ...rest] = opts.steps;
-  if (!first) throw new KaistError('INTERNAL', '로그인 단계가 없습니다.');
-  const browser = await chromium.launch({ headless: false });
-  try {
-    const context = await browser.newContext({ viewport: null });
-    const page = await context.newPage();
-    let closed = false;
-    page.on('close', () => { closed = true; });
-    browser.on('disconnected', () => { closed = true; });
-    const isClosed = () => closed;
-
-    await page.goto(first.startUrl, { waitUntil: 'domcontentloaded' });
-    onStatus('브라우저 창에서 로그인과 폰 승인을 진행해 주세요.');
-    if (!(await waitLoggedIn(page, first, timeoutMs, isClosed))) throw new LoginCancelledError('timeout');
-    const ok: Record<string, boolean> = { [first.id]: true };
-
-    for (const step of rest) {
-      onStatus(`${step.id} 연쇄 로그인 중...`);
-      await page.goto(step.startUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
-      ok[step.id] = await waitLoggedIn(page, step, chainTimeoutMs, isClosed);
-      if (!ok[step.id]) onStatus(`${step.id} 연쇄 로그인이 시간 안에 끝나지 않았습니다. 나머지는 계속합니다.`);
-      await sleep(1500); // 리다이렉트 마무리
-    }
-    return { ok, cookies: await context.cookies() };
-  } finally {
-    await browser.close().catch(() => {});
-  }
+function requireDriver(): LoginDriver {
+  if (!driver) throw new KaistError('INTERNAL', '로그인 드라이버가 설정되지 않았습니다. installPlatform()을 먼저 호출해야 합니다.');
+  return driver;
 }
 
-/** 한 사이트만 로그인 (브라우저를 닫기 전에 쿠키를 확인) */
-export async function browserLogin(opts: BrowserLoginOptions): Promise<Cookie[]> {
-  const { timeoutMs = 5 * 60_000, onStatus = () => {} } = opts;
-  const browser = await chromium.launch({ headless: false });
-  try {
-    const context = await browser.newContext({ viewport: null });
-    const page = await context.newPage();
-    let closed = false;
-    page.on('close', () => { closed = true; });
-    browser.on('disconnected', () => { closed = true; });
-
-    await page.goto(opts.startUrl, { waitUntil: 'domcontentloaded' });
-    onStatus('브라우저 창에서 로그인과 폰 승인을 진행해 주세요.');
-    const step = { id: 'login', startUrl: opts.startUrl, isLoggedIn: opts.isLoggedIn };
-    if (!(await waitLoggedIn(page, step, timeoutMs, () => closed))) throw new LoginCancelledError('timeout');
-
-    const cookies = cookiesFor(await context.cookies(), opts.cookieDomain);
-    if (!(await opts.verify(cookies))) {
-      throw new KaistError('LOGIN_VERIFY_FAILED', '브라우저에서는 로그인됐지만 저장한 쿠키로는 세션이 확인되지 않습니다.');
-    }
-    return cookies;
-  } finally {
-    await browser.close().catch(() => {});
-  }
-}
+export const chainLogin = (opts: ChainLoginOptions): Promise<ChainLoginResult> => requireDriver().chainLogin(opts);
+export const browserLogin = (opts: BrowserLoginOptions): Promise<BrowserCookie[]> => requireDriver().browserLogin(opts);

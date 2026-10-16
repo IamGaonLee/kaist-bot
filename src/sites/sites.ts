@@ -1,6 +1,6 @@
 // 포털·ERP·생활관(kds) 사이트 상수, 허용 목록, 로그인 판별. 개편 시 고칠 곳을 이 파일로 좁힌다.
 // 허용 목록에 없는 (method, path)는 HTTP 계층이 거부한다. 모두 조회(읽기)만 한다. 설계: docs/portal-design.md 7절
-import type { Page } from 'playwright';
+import type { LoginPage } from '../sso/browser-login.js';
 import type { SiteId } from '../klms/session-store.js';
 
 export type PortalSite = Exclude<SiteId, 'klms'>;
@@ -78,7 +78,7 @@ export const PORTAL_BOARDS = [
 export const MUTATING_VERB = /aply|cancel|cancl|modify|save|delete|insert|update|regist|drop|submit|apply/i;
 
 /** 브라우저 안 로그인 완료 판별. page.evaluate에 넘기므로 각 함수는 자기 완결적이어야 한다 */
-export const BROWSER_CHECKS: Record<PortalSite, (page: Page) => Promise<boolean>> = {
+export const BROWSER_CHECKS: Record<PortalSite, (page: LoginPage) => Promise<boolean>> = {
   portal: page => page.evaluate(async () => {
     if (location.host !== 'portal.kaist.ac.kr' || location.pathname.includes('/login')) return false;
     const r = await fetch('/wz/api/widget/identity', { redirect: 'manual' });

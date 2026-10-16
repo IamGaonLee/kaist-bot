@@ -4,12 +4,43 @@
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
     "build": "tsc -p .",
-    "dev": "tsx src/cli.ts"
+    "dev": "tsx src/cli.ts",
+    "build:app": "tsc -p tsconfig.electron.json && node scripts/copy-renderer.mjs",
+    "app": "npm run build:app && electron dist-electron/app/main.js",
+    "dist": "npm run build:app && electron-builder --win nsis"
   },
   "type": "module",
+  "main": "dist-electron/app/main.js",
+  "build": {
+    "appId": "com.gaonlee.kaistbot",
+    "productName": "KAISTBOT",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/node-llama-cpp/**",
+      "node_modules/@node-llama-cpp/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "KAISTBOT-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "KAISTBOT"
+    }
+  },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/turndown": "^5.0.6",
+    "electron": "^44.8.0",
+    "electron-builder": "^25.1.8",
     "playwright": "^1.64.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
@@ -17,10 +48,11 @@
   "dependencies": {
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
+    "jszip": "^3.10.2",
     "marked": "^15.0.12",
-    "turndown": "^7.2.4",
+    "node-llama-cpp": "^3.22.1",
     "pdfjs-dist": "^4.10.38",
-    "jszip": "^3.10.2"
+    "turndown": "^7.2.4"
   },
   "bin": {
     "kaist": "dist/cli.js"
@@ -28,5 +60,7 @@
   "engines": {
     "node": ">=20"
   },
-  "private": true
+  "private": true,
+  "author": "GaonLee",
+  "description": "KAIST 학교생활 자동 정리 (KLMS·포털·드라이브·캘린더·로컬 AI)"
 }

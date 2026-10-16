@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAISTBOT — KAIST 학교생활 자동 정리</title>
+<meta name="description" content="KLMS 과제·공지·강의자료를 모아 구글 드라이브와 캘린더에 정리하는 KAIST 학생용 데스크톱 앱.">
+<style>
+  :root{--bg:#f7f8fa;--fg:#17181b;--sub:#5c636e;--accent:#1a56b0;--accent2:#2b6fd6;--card:#fff;--line:#e5e8ec}
+  @media(prefers-color-scheme:dark){:root{--bg:#15171b;--fg:#e9ebee;--sub:#9aa1ac;--accent:#6ea8ff;--accent2:#89bbff;--card:#1e2126;--line:#2d313a}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Pretendard','Malgun Gothic','Apple SD Gothic Neo',sans-serif;background:var(--bg);color:var(--fg);line-height:1.6}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px}
+  header{padding:64px 0 40px;text-align:center}
+  .logo{width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;display:grid;place-items:center;font-size:34px;font-weight:800;margin:0 auto 20px}
+  h1{font-size:34px;margin:0 0 10px;letter-spacing:-.5px}
+  .tag{font-size:17px;color:var(--sub);margin:0 auto;max-width:560px}
+  .cta{margin-top:28px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-block;padding:13px 24px;border-radius:11px;font-weight:700;text-decoration:none;font-size:15px}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  .note{font-size:12.5px;color:var(--sub);margin-top:10px}
+  section{padding:36px 0;border-top:1px solid var(--line)}
+  h2{font-size:22px;margin:0 0 18px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--sub);font-size:14px}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+  ol.steps li{position:relative;padding:12px 0 12px 44px;border-bottom:1px solid var(--line)}
+  ol.steps li:last-child{border-bottom:0}
+  ol.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:11px;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+  .b{font-weight:700}
+  footer{padding:40px 0;color:var(--sub);font-size:13px;text-align:center}
+  .pill{display:inline-block;font-size:12px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--sub);margin:2px}
+  .warn{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:12px 14px;font-size:13.5px;color:var(--sub)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">K</div>
+    <h1>KAISTBOT</h1>
+    <p class="tag">KLMS 과제·공지·강의자료를 자동으로 모아 구글 드라이브와 캘린더에 정리하는 KAIST 학생용 앱. 로그인은 폰 승인만, 자료 정리와 알림은 알아서.</p>
+    <div class="cta">
+      <a class="btn primary" id="download" href="#download-section">Windows 설치 파일 받기</a>
+      <a class="btn ghost" href="guide.html">사용 설명서</a>
+    </div>
+    <div class="note">Windows 10/11 · 무료 · 개인 학습용</div>
+  </header>
+
+  <section>
+    <h2>무엇을 하나요</h2>
+    <div class="grid">
+      <div class="card"><h3>📥 자동 수집</h3><p>KLMS 과제·공지·강의자료, 포털 시간표·학사일정, 생활관 정보를 한 번에 모읍니다.</p></div>
+      <div class="card"><h3>🗓️ 캘린더 정리</h3><p>마감과 시험을 구글 "KLMS" 캘린더에 자동 등록. 폰 캘린더에서 바로 봅니다.</p></div>
+      <div class="card"><h3>📁 드라이브 정리</h3><p>과목별 폴더에 자료를 내려받고, 읽기 쉬운 요약 PDF를 만들어 둡니다.</p></div>
+      <div class="card"><h3>🔒 숨김 로그인</h3><p>아이디만 저장(비밀번호는 저장 안 함). 로그인은 폰 승인 한 번이면 끝.</p></div>
+      <div class="card"><h3>🤖 내장 AI</h3><p>로컬 오픈소스 모델이 오프라인으로 질문에 답하고 일정 후보를 뽑습니다. 자기 API 키로 GPT·Claude·Gemini도.</p></div>
+      <div class="card"><h3>🔔 자동 동기화</h3><p>트레이에 상주하며 주기적으로 갱신하고, 새 변경은 알림으로 알려줍니다.</p></div>
+    </div>
+  </section>
+
+  <section id="download-section">
+    <h2>다운로드</h2>
+    <p class="note" style="margin-top:0">최신 설치 파일은 GitHub 릴리스에 올라옵니다.</p>
+    <div class="cta" style="justify-content:flex-start">
+      <a class="btn primary" id="release-link" href="#">KAISTBOT-Setup.exe 내려받기</a>
+    </div>
+    <p class="warn" style="margin-top:16px">설치 파일에 서명이 없으면 Windows가 "PC 보호" 경고를 띄웁니다. <span class="b">추가 정보 → 실행</span>을 누르면 설치됩니다. 처음 실행하면 설정 마법사가 계정·드라이브 폴더·구글 연결·AI 모델을 차례로 안내합니다.</p>
+  </section>
+
+  <section>
+    <h2>처음 설정 (설치 마법사)</h2>
+    <ol class="steps">
+      <li><span class="b">학교 계정</span> — 로그인 창에서 아이디를 한 번 입력하면 저장됩니다. 비밀번호는 저장하지 않고, 다음부터는 폰 승인만 합니다.</li>
+      <li><span class="b">드라이브 폴더</span> — 자료를 저장할 구글 드라이브 폴더를 고릅니다.</li>
+      <li><span class="b">구글 연결</span> — 마감·시험을 캘린더에 올립니다. 학교 메일(Gmail) 가져오기는 선택.</li>
+      <li><span class="b">AI 모델</span> — 오프라인 로컬 모델(1.5B/3B/7B)을 고르거나, 자기 API 키로 GPT·Claude·Gemini를 붙입니다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>개인정보와 안전</h2>
+    <div class="grid">
+      <div class="card"><h3>읽기만 합니다</h3><p>제출·글쓰기·설정 변경은 하지 않습니다. 수집한 자료는 개인 학습용입니다.</p></div>
+      <div class="card"><h3>비밀번호 미저장</h3><p>학교 비밀번호는 저장·자동입력하지 않습니다. 2단계 인증(폰 승인)은 그대로.</p></div>
+      <div class="card"><h3>내 기기에만</h3><p>쿠키·성적·생활관 정보는 이 PC에만 둡니다. 성적은 드라이브·요약에 나가지 않습니다.</p></div>
+    </div>
+    <div style="margin-top:14px">
+      <span class="pill">Windows 10/11</span><span class="pill">Electron</span><span class="pill">로컬 AI (node-llama-cpp)</span><span class="pill">구글 캘린더·Gmail</span>
+    </div>
+  </section>
+
+  <footer>
+    개인이 만든 비공식 도구입니다. KAIST와 무관합니다. · <a href="guide.html" style="color:var(--accent)">설명서</a>
+  </footer>
+</div>
+<script>
+  // 릴리스 링크는 저장소 정보로 채운다(GitHub Pages면 user.github.io/repo 경로에서 추정).
+  (function(){
+    var owner='', repo='';
+    var h=location.hostname, p=location.pathname.split('/').filter(Boolean);
+    if(h.endsWith('github.io')){ owner=h.split('.')[0]; repo=p[0]||''; }
+    var rel = owner&&repo ? ('https://github.com/'+owner+'/'+repo+'/releases/latest') : '#';
+    document.getElementById('release-link').href = rel;
+    document.getElementById('download').setAttribute('href', rel==='#' ? '#download-section' : rel);
+  })();
+</script>
+</body>
+</html>
