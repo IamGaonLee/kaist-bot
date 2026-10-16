@@ -67,12 +67,14 @@ interface WaitOpts {
   getDialogError?: () => KaistError | null;
   captureId?(page: LoginPage): Promise<string | null>;
   onId?(id: string): void;
+  onStatus?(message: string): void;
 }
 
 /** 완료될 때까지 기다린다. 창이 닫히면 취소, alert 실패면 중단. captureId가 있으면 매 회 읽어 둔다. */
 async function waitLoggedIn(page: Page, step: LoginStep, timeoutMs: number, isClosed: () => boolean, opts: WaitOpts = {}): Promise<boolean> {
   const lp = asLoginPage(page);
   const seen = new Set<string>();
+  let lastDesc = '';
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (isClosed()) throw new LoginCancelledError('closed');
@@ -81,6 +83,10 @@ async function waitLoggedIn(page: Page, step: LoginStep, timeoutMs: number, isCl
     if (Date.now() > deadline) return false;
     await debugStage(page, seen);
     await step.prepare?.(lp).catch(() => {});
+    if (step.describe && opts.onStatus) {
+      const d = await step.describe(lp).catch(() => null);
+      if (d && d !== lastDesc) { lastDesc = d; opts.onStatus(d); }
+    }
     if (opts.captureId) {
       const id = await opts.captureId(lp).catch(() => null);
       if (id) opts.onId?.(id);
@@ -94,9 +100,9 @@ async function chainLogin(opts: ChainLoginOptions): Promise<ChainLoginResult> {
   const { timeoutMs = 5 * 60_000, chainTimeoutMs = 60_000, onStatus = () => {} } = opts;
   const [first, ...rest] = opts.steps;
   if (!first) throw new KaistError('INTERNAL', '로그인 단계가 없습니다.');
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: !!opts.headless });
   try {
-    const context = await browser.newContext({ viewport: null });
+    const context = await browser.newContext({ viewport: opts.headless ? undefined : null, userAgent: opts.userAgent });
     const page = await context.newPage();
     const getDialogError = watchDialogs(page);
     let closed = false;
@@ -105,9 +111,9 @@ async function chainLogin(opts: ChainLoginOptions): Promise<ChainLoginResult> {
     const isClosed = () => closed;
 
     await page.goto(first.startUrl, { waitUntil: 'domcontentloaded' });
-    onStatus(first.prepare ? '프로그램이 로그인 화면을 넘깁니다. 폰에서 로그인을 승인해 주세요.' : '브라우저 창에서 로그인과 폰 승인을 진행해 주세요.');
+    onStatus(opts.headless ? '로그인 중입니다...' : first.prepare ? '프로그램이 로그인 화면을 넘깁니다. 폰에서 로그인을 승인해 주세요.' : '브라우저 창에서 로그인과 폰 승인을 진행해 주세요.');
     let capturedId: string | undefined;
-    if (!(await waitLoggedIn(page, first, timeoutMs, isClosed, { getDialogError, captureId: first.captureId, onId: id => { capturedId = id; } }))) {
+    if (!(await waitLoggedIn(page, first, timeoutMs, isClosed, { getDialogError, onStatus, captureId: first.captureId, onId: id => { capturedId = id; } }))) {
       throw new LoginCancelledError('timeout');
     }
     const ok: Record<string, boolean> = { [first.id]: true };
@@ -115,7 +121,7 @@ async function chainLogin(opts: ChainLoginOptions): Promise<ChainLoginResult> {
     for (const step of rest) {
       onStatus(`${step.id} 연쇄 로그인 중...`);
       await page.goto(step.startUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
-      ok[step.id] = await waitLoggedIn(page, step, chainTimeoutMs, isClosed, { getDialogError });
+      ok[step.id] = await waitLoggedIn(page, step, chainTimeoutMs, isClosed, { getDialogError, onStatus });
       if (!ok[step.id]) onStatus(`${step.id} 연쇄 로그인이 시간 안에 끝나지 않았습니다. 나머지는 계속합니다.`);
       await sleep(1500); // 리다이렉트 마무리
     }

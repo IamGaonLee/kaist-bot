@@ -25,6 +25,8 @@ export interface LoginStep {
   isLoggedIn(page: LoginPage): Promise<boolean>;
   /** (선택) 매 대기 회마다 호출. 현재 화면에서 눌러야 할 버튼을 눌러 진행한다(아이디 입력·포털 로그인·기기 등록 등). 각 클릭은 페이지를 넘기므로 중복 클릭되지 않는다. */
   prepare?(page: LoginPage): Promise<void>;
+  /** (선택) 현재 화면을 사람이 볼 문구로. 창을 숨겼을 때 2단계 인증 번호 등을 앱 화면에 띄우는 용도. 바뀔 때만 onStatus로 나간다. */
+  describe?(page: LoginPage): Promise<string | null>;
   /** (선택) 로그인 페이지에서 사용자가 입력한 아이디를 읽는다(저장 옵션일 때만 단다). 없으면 null. */
   captureId?(page: LoginPage): Promise<string | null>;
 }
@@ -36,6 +38,10 @@ export interface ChainLoginOptions {
   timeoutMs?: number;
   /** 연쇄 단계마다 대기 시간 */
   chainTimeoutMs?: number;
+  /** 창을 숨긴다(사용자는 앱 화면만 본다). 자동 넘김이 되므로 상호작용이 필요 없을 때. */
+  headless?: boolean;
+  /** 브라우저 User-Agent (headless 티를 없애려면 일반 UA) */
+  userAgent?: string;
   onStatus?(message: string): void;
 }
 

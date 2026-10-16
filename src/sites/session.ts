@@ -5,7 +5,7 @@ import { getSavedId, saveId } from '../sso/account.js';
 import { KlmsHttp } from '../klms/http.js';
 import { probe as probeKlms } from '../klms/session.js';
 import { SessionStore, SITES, type SessionFile, type SiteId, type StoredCookie } from '../klms/session-store.js';
-import { KLMS_BASE, KLMS_HOST, URLS, browserLoggedInCheck } from '../klms/site.js';
+import { KLMS_BASE, KLMS_HOST, URLS, USER_AGENT, browserLoggedInCheck } from '../klms/site.js';
 import { SiteHttp, type SiteResponse } from './http.js';
 import { BROWSER_CHECKS, ERP_BASE_FORM, SITE_DEFS, type PortalSite } from './sites.js';
 
@@ -147,11 +147,23 @@ const captureSimpleId = (page: LoginPage): Promise<string | null> =>
     return el && el.value ? el.value : null;
   });
 
+// 창을 숨겼을 때 앱 화면에 띄울 문구. 2단계 인증 화면이면 인증 번호와 남은 시간을 보여준다(폰에서 맞춰 승인).
+const describeLogin = (page: LoginPage): Promise<string | null> =>
+  page.evaluate(() => {
+    let nums = [...document.querySelectorAll('.auth_number')].filter(e => (e as HTMLElement).offsetParent !== null)
+      .map(e => (e as HTMLElement).innerText.trim()).join('').replace(/\s+/g, '');
+    // 번호가 화면에 두 번 나와 이어붙는 경우(예: "65"가 "6565") 앞 절반만 쓴다
+    if (nums.length % 2 === 0 && nums.slice(0, nums.length / 2) === nums.slice(nums.length / 2)) nums = nums.slice(0, nums.length / 2);
+    // 번호만 (카운트다운은 매초 바뀌어 메시지가 도배되므로 넣지 않는다 — 앱에서는 따로 표시)
+    return nums ? `폰에서 로그인을 승인해 주세요. 인증 번호: ${nums}` : null;
+  });
+
 /** 모든 단계에 자동 넘김(advance)을 달고, 첫 단계에만 저장용 아이디 캡처를 단다 */
 function withLogin(step: LoginStep, fillId: string | null, first: boolean, saveId: boolean): LoginStep {
   return {
     ...step,
     prepare: advanceLogin(fillId),
+    describe: describeLogin,
     ...(first && saveId ? { captureId: captureSimpleId } : {}),
   };
 }
@@ -165,7 +177,7 @@ export interface LoginAllResult {
  * 로그인 창 1개: 포털에서 사용자가 로그인(2단계 인증 1회) → KLMS·ERP·kds 연쇄.
  * 한 사이트가 실패해도 나머지는 저장한다. only를 주면 그 사이트만(포털 경유가 필요한 ERP는 포털부터).
  */
-export async function loginAll(opts: { only?: SiteId; fillId?: string; saveId?: boolean; onStatus?: (m: string) => void; store?: SessionStore } = {}): Promise<LoginAllResult> {
+export async function loginAll(opts: { only?: SiteId; fillId?: string; saveId?: boolean; headless?: boolean; onStatus?: (m: string) => void; store?: SessionStore } = {}): Promise<LoginAllResult> {
   const store = opts.store ?? new SessionStore();
   const order: SiteId[] = opts.only === 'klms' ? ['klms']
     : opts.only === 'kds' ? ['portal', 'kds']
@@ -174,7 +186,7 @@ export async function loginAll(opts: { only?: SiteId; fillId?: string; saveId?: 
   // 저장된 아이디가 있으면 자동 입력(결정 2, 기본은 저장 안 함). 비밀번호는 다루지 않는다.
   const fillId = opts.fillId ?? getSavedId();
   const steps = order.map((s, i) => withLogin(STEPS[s], fillId, i === 0, !!opts.saveId));
-  const r = await chainLogin({ steps, onStatus: opts.onStatus });
+  const r = await chainLogin({ steps, headless: opts.headless, userAgent: USER_AGENT, onStatus: opts.onStatus });
   if (opts.saveId && r.capturedId) saveId(r.capturedId);
   const split = splitCookies(r.cookies);
   const targets = opts.only ? [opts.only] : order;

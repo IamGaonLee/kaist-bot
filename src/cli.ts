@@ -6,7 +6,7 @@ import { fetchCurrentCourses, type Course } from './klms/courses.js';
 import { SITES, type SiteId } from './klms/session-store.js';
 import { ensureSession } from './klms/session.js';
 import { loginAll, probeSite, siteStatuses } from './sites/session.js';
-import { forgetId } from './sso/account.js';
+import { forgetId, getSavedId } from './sso/account.js';
 import { dormSummary, listCampusEvents, undoCampus, listCollegePlan, listTimetable, todayKst } from './sites/campus.js';
 import { listPortalNotices } from './sites/notices.js';
 import { listGrades, refreshGrades } from './sites/grades.js';
@@ -70,8 +70,9 @@ program.command('login')
   .option('--only <site>', '이 사이트만 로그인 (klms|portal|erp|kds)')
   .option('--save-id', '이번 로그인에서 입력한 아이디를 저장(다음부터 아이디 자동 입력, 비밀번호는 저장 안 함)')
   .option('--forget-id', '저장한 아이디 삭제')
+  .option('--show-browser', '브라우저 창을 띄운다(기본은 숨김). 아이디를 저장하지 않았거나 문제 확인용')
   .option('--json', 'JSON 출력')
-  .action(run(async (opts: { force?: boolean; only?: string; saveId?: boolean; forgetId?: boolean; json?: boolean }) => {
+  .action(run(async (opts: { force?: boolean; only?: string; saveId?: boolean; forgetId?: boolean; showBrowser?: boolean; json?: boolean }) => {
     if (opts.forgetId) { forgetId(); if (!opts.force) { output(opts.json, { forgot: true }, () => '저장한 아이디를 삭제했습니다.'); return; } }
     if (opts.only && !(SITES as readonly string[]).includes(opts.only)) throw new KaistError('BAD_ARGS', `--only는 ${SITES.join('|')} 중 하나입니다.`);
     const only = opts.only as SiteId | undefined;
@@ -83,7 +84,9 @@ program.command('login')
       output(opts.json, { loggedIn: true, reused: true, sites: targets.map(site => ({ site, chained: false, state: 'ok' })) }, () => '이미 로그인되어 있습니다 (세션 재사용).');
       return;
     }
-    const r = await loginAll({ only, saveId: opts.saveId, onStatus: status });
+    // 아이디를 저장해 자동 넘김이 가능할 때만 창을 숨긴다(아이디 입력이 필요하면 창을 보여줘야 함)
+    const headless = !opts.showBrowser && !opts.saveId && !!getSavedId();
+    const r = await loginAll({ only, saveId: opts.saveId, headless, onStatus: status });
     const failed = r.sites.filter(x => x.state !== 'ok');
     if (failed.length) process.exitCode = 1;
     output(opts.json, { loggedIn: failed.length === 0, reused: false, sites: r.sites }, d => [
