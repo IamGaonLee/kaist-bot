@@ -5,7 +5,11 @@ contextBridge.exposeInMainWorld('kaist', {
   appInfo: () => ipcRenderer.invoke('app:info'),
   login: (opts) => ipcRenderer.invoke('login', opts),
   sync: () => ipcRenderer.invoke('sync'),
-  ask: (q) => ipcRenderer.invoke('ask', q),
+  ask: (q, opts) => ipcRenderer.invoke('ask', q, opts),
+  aiSelect: (sel) => ipcRenderer.invoke('ai:select', sel),
+  aiSetEffort: (effort) => ipcRenderer.invoke('ai:setEffort', effort),
+  eventsList: () => ipcRenderer.invoke('events:list'),
+  eventsCancel: (id) => ipcRenderer.invoke('events:cancel', id),
   eventsSuggest: (opts) => ipcRenderer.invoke('events:suggest', opts),
   eventsRegister: (s) => ipcRenderer.invoke('events:register', s),
   eventsDismiss: (id) => ipcRenderer.invoke('events:dismiss', id),
@@ -16,6 +20,10 @@ contextBridge.exposeInMainWorld('kaist', {
   aiSetModel: (uri) => ipcRenderer.invoke('ai:setModel', uri),
   aiSetApiKey: (opts) => ipcRenderer.invoke('ai:setApiKey', opts),
   aiDownload: () => ipcRenderer.invoke('ai:download'),
+  homeState: () => ipcRenderer.invoke('home:state'),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateOpen: () => ipcRenderer.invoke('update:open'),
+  onUpdate: (cb) => { ipcRenderer.on('update', (_e, info) => cb(info)); },
   onStatus: (cb) => {
     const h = (_e, msg) => cb(msg);
     ipcRenderer.on('status', h);

@@ -1,168 +1,360 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
-  <title>KAISTBOT</title>
-  <style>
-    :root { --bg: #f7f8fa; --fg: #1a1a1a; --sub: #666; --accent: #1a56b0; --card: #fff; --line: #e3e6ea; --ok: #1a7f37; --err: #c4320a; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #1c1f24; --fg: #e8eaed; --sub: #9aa0a6; --accent: #6ea8ff; --card: #262a30; --line: #363b42; --ok: #4caf50; --err: #ff6b4a; } }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: var(--bg); color: var(--fg); }
-    header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
-    header .logo { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
-    header h1 { font-size: 15px; margin: 0; }
-    header .ver { font-size: 11px; color: var(--sub); }
-    main { padding: 20px 18px; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; text-align: center; }
-    .muted { color: var(--sub); font-size: 13px; }
-    button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 11px 18px; cursor: pointer; }
-    button:disabled { opacity: .5; cursor: default; }
-    .big-num { font-size: 44px; font-weight: 800; letter-spacing: 6px; margin: 14px 0; color: var(--accent); }
-    .title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
-    .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 6px auto 12px; animation: spin 0.9s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .ok { color: var(--ok); } .err { color: var(--err); }
-    .hidden { display: none; }
-    .sites { margin-top: 10px; font-size: 12px; color: var(--sub); }
-  </style>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net data:; img-src 'self' data:;">
+<title>KAISTBOT</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<style>
+/* ===== 토큰 (Linear/Geist/Raycast 벤치마크, 레이아웃은 ChatGPT·Claude 데스크톱: 사이드바 + 본문) ===== */
+:root{
+  --bg:#f5f6f8;--bg-subtle:#eef0f3;--surface:#fff;--surface-hover:#f1f2f5;--surface-sunken:#e9ebef;
+  --text:#16181d;--text-secondary:#3f434b;--text-muted:#6b7079;--text-faint:#969ba3;--text-on-accent:#fff;
+  --border:rgba(18,22,31,.10);--border-strong:rgba(18,22,31,.16);--border-subtle:rgba(18,22,31,.05);
+  --accent:#5b63d3;--accent-hover:#4e56c4;--accent-text:#4b54c6;--accent-subtle:#eceefb;--accent-border:rgba(91,99,211,.35);
+  --success:#1f9d55;--success-fill:#22a95b;--success-subtle:#e6f6ed;
+  --warning:#b9760b;--warning-fill:#eab308;--warning-subtle:#fbf0db;
+  --danger:#cf3a3a;--danger-fill:#dc4040;--danger-subtle:#fcebeb;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06);--shadow-md:0 4px 12px rgba(16,24,40,.08),0 1px 3px rgba(16,24,40,.05);
+  --ring:0 0 0 3px rgba(91,99,211,.35);
+  --font-sans:"Pretendard Variable",Pretendard,-apple-system,system-ui,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono","JetBrains Mono",ui-monospace,Consolas,monospace;
+  --r-sm:6px;--r-md:10px;--r-lg:14px;--r-xl:18px;--r-full:999px;
+  --sidebar:232px;--col:760px;
+  color-scheme:light;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#0a0c0f;--bg-subtle:#101216;--surface:#15171c;--surface-hover:#1c1f25;--surface-sunken:#060709;
+  --text:#f2f3f5;--text-secondary:#c4c9d1;--text-muted:#8a8f98;--text-faint:#5f646d;
+  --border:rgba(255,255,255,.09);--border-strong:rgba(255,255,255,.15);--border-subtle:rgba(255,255,255,.05);
+  --accent:#6c76e8;--accent-hover:#7f88f2;--accent-text:#9aa2ff;--accent-subtle:rgba(108,118,232,.18);--accent-border:rgba(124,132,255,.45);
+  --success:#3fb950;--success-fill:#2ea043;--success-subtle:rgba(63,185,80,.15);
+  --warning:#e3b341;--warning-fill:#d8a62e;--warning-subtle:rgba(227,179,65,.15);
+  --danger:#f16a6a;--danger-fill:#da4a4a;--danger-subtle:rgba(241,106,106,.15);
+  --shadow-sm:none;--shadow-md:0 2px 8px rgba(0,0,0,.45);--ring:0 0 0 3px rgba(124,132,255,.45);
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text)}
+body{font:450 14px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased;letter-spacing:-.01em;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:var(--r-full);border:3px solid transparent;background-clip:padding-box}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+svg{width:18px;height:18px;flex:none}
+
+/* ===== 셸: 사이드바 + 본문 ===== */
+.app{height:100%;display:flex}
+.side{width:var(--sidebar);flex:none;display:flex;flex-direction:column;background:var(--bg-subtle);border-right:1px solid var(--border);padding:10px}
+.side__brand{display:flex;align-items:center;gap:10px;padding:10px 10px 14px;-webkit-app-region:drag}
+.side__logo{width:30px;height:30px;border-radius:9px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px/1 var(--font-sans);letter-spacing:0}
+.side__name{font:700 15px/1.2 var(--font-sans)}
+.side__ver{font-size:11px;color:var(--text-faint)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav__item{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--r-md);border:0;background:none;color:var(--text-secondary);cursor:pointer;font:500 14px/1 var(--font-sans);text-align:left;transition:background .12s,color .12s;width:100%}
+.nav__item:hover{background:var(--surface-hover);color:var(--text)}
+.nav__item.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);font-weight:600}
+.nav__item.on svg{color:var(--accent-text)}
+.nav__badge{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:var(--r-full);background:var(--accent);color:#fff;font:600 11px/18px var(--font-sans);text-align:center;display:none}
+.nav__badge.on{display:block}
+.side__spacer{flex:1}
+.side__status{border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-muted)}
+.side__status .st{display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:var(--r-full);background:var(--text-faint);flex:none}
+.dot.ok{background:var(--success-fill)}.dot.warn{background:var(--warning-fill)}.dot.bad{background:var(--danger-fill)}
+.side__status .old{color:var(--warning)}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.topbar{height:52px;flex:none;display:flex;align-items:center;gap:10px;padding:0 24px;border-bottom:1px solid var(--border);-webkit-app-region:drag}
+.topbar__right{margin-left:auto;display:flex;gap:8px;align-items:center;-webkit-app-region:no-drag}
+.content{flex:1;overflow-y:auto;overflow-x:hidden}
+.pane{display:none;padding:24px;animation:fade .18s ease}
+.pane.on{display:block}
+.pane--narrow{max-width:var(--col);margin:0 auto}
+.pane--chat{display:none;flex-direction:column;height:100%;padding:0}
+.pane--chat.on{display:flex}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:1000px){.grid2{grid-template-columns:1fr}}
+
+/* ===== 공통 ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 14px;border-radius:var(--r-md);font:600 14px/1 var(--font-sans);cursor:pointer;border:1px solid transparent;transition:background .12s,border-color .12s,transform .06s;user-select:none;white-space:nowrap}
+.btn:active{transform:translateY(.5px)}.btn:focus-visible{outline:0;box-shadow:var(--ring)}
+.btn--primary{background:var(--accent);color:var(--text-on-accent)}.btn--primary:hover{background:var(--accent-hover)}
+.btn--secondary{background:var(--surface);color:var(--text);border-color:var(--border-strong)}.btn--secondary:hover{background:var(--surface-hover)}
+.btn--ghost{background:transparent;color:var(--text-secondary)}.btn--ghost:hover{background:var(--surface-hover);color:var(--text)}
+.btn--danger{background:transparent;color:var(--danger);border-color:var(--border)}.btn--danger:hover{background:var(--danger-subtle)}
+.btn--sm{height:28px;padding:0 10px;font-size:13px}.btn--full{width:100%}.btn[disabled]{opacity:.5;pointer-events:none}
+.btn svg{width:16px;height:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;box-shadow:var(--shadow-sm)}
+.card--flush{padding:0;overflow:hidden}
+.card+.card{margin-top:12px}
+.sec{margin-top:20px}.sec:first-child{margin-top:0}
+.sec__hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.label{font:600 12px/1.4 var(--font-sans);color:var(--text-muted);letter-spacing:.02em}
+.link{background:none;border:0;color:var(--accent-text);font:500 12px/1 var(--font-sans);cursor:pointer;padding:4px}
+.h1{font:700 17px/1.3 var(--font-sans);margin:0}
+.h2{font:600 15px/1.3 var(--font-sans);margin:0}
+.caption{font:400 12px/1.45 var(--font-sans);color:var(--text-muted)}
+.row{display:grid;grid-template-columns:4px 1fr auto;gap:0 12px;align-items:center;padding:12px 14px;transition:background .12s}
+.row+.row{border-top:1px solid var(--border-subtle)}.row:hover{background:var(--surface-hover)}
+.row__rail{grid-row:1/span 2;width:3px;height:70%;border-radius:var(--r-full);background:var(--text-faint)}
+.row--soon .row__rail{background:var(--warning-fill)}.row--urgent .row__rail{background:var(--danger-fill)}.row--done .row__rail{background:var(--success-fill)}
+.row__title{font:600 14px/1.35 var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row__meta{grid-column:2;font:400 12px/1.4 var(--font-sans);color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row__right{grid-column:3;grid-row:1/span 2;display:flex;align-items:center;gap:8px}
+.badge{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:var(--r-full);font:500 11px/1 var(--font-sans);white-space:nowrap}
+.badge--neutral{background:var(--surface-sunken);color:var(--text-muted)}.badge--accent{background:var(--accent-subtle);color:var(--accent-text)}
+.badge--success{background:var(--success-subtle);color:var(--success)}.badge--warning{background:var(--warning-subtle);color:var(--warning)}.badge--danger{background:var(--danger-subtle);color:var(--danger)}
+.badge--dot::before{content:"";width:6px;height:6px;border-radius:var(--r-full);background:currentColor}
+.input{width:100%;height:38px;padding:0 12px;border-radius:var(--r-md);background:var(--surface-sunken);border:1px solid var(--border);color:var(--text);font:400 14px/1 var(--font-sans);transition:border-color .12s,box-shadow .12s}
+.input::placeholder{color:var(--text-faint)}.input:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring);background:var(--surface)}
+.select{height:30px;padding:0 28px 0 10px;border-radius:var(--r-md);background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7079' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;border:1px solid var(--border-strong);color:var(--text);font:500 13px/1 var(--font-sans);appearance:none;cursor:pointer;max-width:260px}
+.select:hover{background-color:var(--surface-hover)}.select:focus{outline:0;box-shadow:var(--ring)}
+.seg{display:inline-flex;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--r-md);padding:2px}
+.seg button{height:24px;padding:0 10px;border:0;border-radius:7px;background:none;color:var(--text-muted);font:500 12px/1 var(--font-sans);cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);font-weight:600}
+.spinner{width:16px;height:16px;border-radius:var(--r-full);border:2px solid var(--border-strong);border-top-color:var(--accent);animation:spin .7s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.progress{height:6px;border-radius:var(--r-full);background:var(--surface-sunken);overflow:hidden}
+.progress__bar{height:100%;background:var(--accent);width:35%;animation:indet 1.1s ease-in-out infinite}
+@keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
+.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:32px 20px;text-align:center;color:var(--text-muted)}
+.empty__title{font:600 14px/1.4 var(--font-sans);color:var(--text-secondary)}
+.empty__sub{font-size:12px;max-width:320px}
+.banner{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r-md);font-size:13px;margin-bottom:12px}
+.banner--warn{background:var(--warning-subtle);color:var(--warning)}.banner--danger{background:var(--danger-subtle);color:var(--danger)}.banner--ok{background:var(--success-subtle);color:var(--success)}
+.banner .btn{margin-left:auto}
+.quick{display:flex;gap:8px;margin-top:12px}
+.quick .btn{flex:1;flex-direction:column;height:56px;gap:4px;font:500 12px/1 var(--font-sans)}
+.status-line{display:flex;align-items:center;justify-content:space-between}
+.hint{font-size:12px;color:var(--text-muted);margin-top:8px;min-height:16px}
+
+/* ===== 2FA 오버레이 ===== */
+.overlay{position:absolute;inset:0;background:var(--bg);display:none;z-index:10}
+.overlay.on{display:flex}
+.auth{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center}
+.auth__icon{width:48px;height:48px;color:var(--accent-text)}
+.auth__num{font:700 64px/1 var(--font-mono);letter-spacing:.08em;color:var(--accent-text);background:var(--accent-subtle);border:1.5px solid var(--accent-border);border-radius:var(--r-xl);padding:22px 40px;box-shadow:var(--shadow-md);position:relative;min-width:180px}
+.auth__num::after{content:"";position:absolute;inset:-1.5px;border-radius:inherit;border:1.5px solid var(--accent);opacity:0;animation:pulse 1.8s ease-out infinite}
+@keyframes pulse{0%{opacity:.6;transform:scale(1)}100%{opacity:0;transform:scale(1.06)}}
+.auth__num.ok{color:var(--success);border-color:var(--success);background:var(--success-subtle)}.auth__num.ok::after{animation:none}
+.auth__num.bad{color:var(--danger);border-color:var(--danger);background:var(--danger-subtle)}.auth__num.bad::after{animation:none}
+.auth__wait{display:inline-flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px}
+
+/* ===== 채팅 ===== */
+.chat__scroll{flex:1;overflow-y:auto}
+.chat{max-width:var(--col);margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:12px;min-height:100%}
+.bubble{max-width:82%;padding:10px 14px;border-radius:16px;font:400 14px/1.6 var(--font-sans);word-break:break-word;white-space:pre-wrap}
+.bubble--user{align-self:flex-end;background:var(--accent);color:var(--text-on-accent);border-bottom-right-radius:5px}
+.bubble--bot{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:5px}
+.bubble__meta{font-size:11px;color:var(--text-faint);margin-top:-6px;align-self:flex-start;padding-left:4px}
+.typing{display:inline-flex;gap:4px;padding:12px 14px;align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:16px}
+.typing span{width:6px;height:6px;border-radius:var(--r-full);background:var(--text-faint);animation:blink 1.2s infinite}
+.typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
+.composer-wrap{flex:none;padding:12px 24px 18px;border-top:1px solid var(--border);background:var(--bg)}
+.composer{max-width:var(--col);margin:0 auto;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);padding:8px 8px 8px 14px}
+.composer:focus-within{border-color:var(--accent);box-shadow:var(--ring)}
+.composer__row{display:flex;gap:8px;align-items:center}
+.composer__in{flex:1;border:0;background:none;font:400 14px/1.5 var(--font-sans);outline:0;min-height:28px}
+.composer__send{width:34px;height:34px;padding:0;border-radius:var(--r-md)}
+.composer__tools{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
+.composer__tools .caption{margin-left:auto}
+
+/* ===== 일정 ===== */
+.sugg{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.sugg+.sugg{margin-top:8px}
+.sugg__head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sugg__title{font:600 14px/1.3 var(--font-sans);flex:1;min-width:0}
+.sugg__quote{font:400 12px/1.5 var(--font-sans);color:var(--text-secondary);background:var(--surface-sunken);border-left:2px solid var(--border-strong);border-radius:0 var(--r-sm) var(--r-sm) 0;padding:6px 10px}
+.sugg__meta{font-size:12px;color:var(--text-muted)}
+.sugg__actions{display:flex;gap:8px;align-items:center}
+.sugg.off{opacity:.45}
+
+/* ===== 설정 ===== */
+.steps{display:flex;gap:6px;margin-bottom:14px}
+.steps i{width:8px;height:8px;border-radius:var(--r-full);background:var(--border-strong)}
+.steps i.on{background:var(--accent)}.steps i.done{background:var(--success-fill)}
+.step{display:none}.step.on{display:block}
+.radio-card{display:flex;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--r-md);cursor:pointer;transition:border-color .12s,background .12s;align-items:flex-start}
+.radio-card+.radio-card{margin-top:8px}
+.radio-card.on{border-color:var(--accent);background:var(--accent-subtle)}
+.radio-dot{width:18px;height:18px;border-radius:var(--r-full);border:2px solid var(--border-strong);flex:none;margin-top:1px}
+.radio-card.on .radio-dot{border-color:var(--accent);background:radial-gradient(circle,var(--accent) 0 5px,transparent 6px)}
+.radio-card b{font-weight:600}
+.presets{display:flex;gap:6px;margin:8px 0}
+.presets .btn{flex:1}
+.field+.field{margin-top:8px}
+.wiz-nav{display:flex;gap:8px;justify-content:space-between;margin-top:14px}
+</style>
 </head>
 <body>
-  <header>
-    <div class="logo">K</div>
-    <div><h1>KAISTBOT</h1><div class="ver" id="ver"></div></div>
-  </header>
-  <main>
-    <!-- 첫 실행 설정 마법사 -->
-    <div class="card hidden" id="screen-wizard" style="text-align:left">
-      <div class="title" style="text-align:center">처음 설정</div>
-      <div class="muted" style="text-align:center; margin-bottom:12px">세 가지만 하면 끝입니다.</div>
+<div class="app" id="app">
+  <aside class="side">
+    <div class="side__brand"><div class="side__logo">K</div><div><div class="side__name">KAISTBOT</div><div class="side__ver" id="app-ver">–</div></div></div>
+    <nav class="nav" id="nav">
+      <button class="nav__item on" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2z"/></svg>홈</button>
+      <button class="nav__item" data-tab="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>질문<span class="nav__badge" id="nb-ai"></span></button>
+      <button class="nav__item" data-tab="events"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>일정<span class="nav__badge" id="nb-events"></span></button>
+      <button class="nav__item" data-tab="sync"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>동기화</button>
+      <button class="nav__item" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>설정</button>
+    </nav>
+    <div class="side__spacer"></div>
+    <div class="side__status">
+      <div class="st"><span class="dot" id="st-dot"></span><span id="st-login">확인 중</span></div>
+      <div class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" style="width:14px;height:14px"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg><span id="st-fresh">–</span></div>
+      <div class="st" id="st-update" style="display:none"><span class="dot ok"></span><button class="link" id="st-update-btn" style="padding:0">새 버전 다운로드</button></div>
+    </div>
+  </aside>
 
-      <div class="step" id="step-account" style="padding:10px 0; border-bottom:1px solid var(--line)">
-        <div><b>1. 학교 계정</b> <span id="account-badge" class="muted"></span></div>
-        <div class="muted" style="font-size:12px; margin:4px 0">로그인 창에서 아이디를 한 번 입력하면 저장됩니다(비밀번호는 저장 안 함). 다음부터 폰 승인만.</div>
-        <button id="wz-login">로그인하고 아이디 저장</button>
-      </div>
-
-      <div class="step" id="step-drive" style="padding:10px 0; border-bottom:1px solid var(--line)">
-        <div><b>2. 드라이브 폴더</b> <span id="drive-badge" class="muted"></span></div>
-        <div class="muted" style="font-size:12px; margin:4px 0">수집한 자료를 저장할 폴더(구글 드라이브 동기화 폴더 안).</div>
-        <div class="muted" id="drive-path" style="font-size:12px; word-break:break-all"></div>
-        <button id="wz-drive" style="background:transparent; color:var(--accent); border:1px solid var(--line)">폴더 선택</button>
-      </div>
-
-      <div class="step" id="step-google" style="padding:10px 0; border-bottom:1px solid var(--line)">
-        <div><b>3. 구글 연결</b> <span id="google-badge" class="muted"></span></div>
-        <div class="muted" style="font-size:12px; margin:4px 0">마감·시험을 구글 "KLMS" 캘린더에 올립니다.</div>
-        <label class="muted" style="font-size:12px; display:block; margin:4px 0"><input type="checkbox" id="wz-gmail"> 학교 메일(Gmail)도 가져오기</label>
-        <button id="wz-google">구글 승인</button>
-      </div>
-
-      <div class="step" id="step-ai" style="padding:10px 0">
-        <div><b>4. AI 모델</b> <span id="ai-badge" class="muted"></span></div>
-        <div class="muted" style="font-size:12px; margin:4px 0">대화·일정 추출에 쓸 모델. 로컬 모델은 내려받아 오프라인으로 돌아갑니다.</div>
-        <div id="ai-models"></div>
-        <label class="muted" style="font-size:12px; display:flex; gap:6px; align-items:center; margin-top:6px">
-          <input type="radio" name="aimodel" id="ai-ext" value="__ext__"> 외부 AI 사용(자기 API 키)
-        </label>
-        <div id="ai-ext-fields" class="hidden" style="margin:6px 0 0 20px">
-          <div style="display:flex; gap:5px; margin-bottom:6px">
-            <button type="button" class="ai-preset" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini" style="flex:1; background:transparent; color:var(--accent); border:1px solid var(--line); font-size:12px; padding:6px">GPT</button>
-            <button type="button" class="ai-preset" data-base="https://api.anthropic.com/v1" data-model="claude-3-5-haiku-latest" style="flex:1; background:transparent; color:var(--accent); border:1px solid var(--line); font-size:12px; padding:6px">Claude</button>
-            <button type="button" class="ai-preset" data-base="https://generativelanguage.googleapis.com/v1beta/openai" data-model="gemini-2.0-flash" style="flex:1; background:transparent; color:var(--accent); border:1px solid var(--line); font-size:12px; padding:6px">Gemini</button>
+  <div class="main">
+    <header class="topbar"><span class="h1" id="topbar-title">홈</span><div class="topbar__right" id="topbar-right"></div></header>
+    <main class="content" id="content">
+      <!-- 홈 -->
+      <section class="pane pane--narrow on" data-pane="home">
+        <div id="home-banner"></div>
+        <div class="card">
+          <div class="status-line">
+            <span class="badge badge--dot badge--neutral" id="home-login">확인 중</span>
+            <span class="caption" id="home-sync"></span>
           </div>
-          <input id="ai-key" placeholder="API 키" style="width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--fg); font:inherit; margin-bottom:5px">
-          <input id="ai-base" placeholder="Base URL (기본 https://api.openai.com/v1)" style="width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--fg); font:inherit; margin-bottom:5px">
-          <input id="ai-model" placeholder="모델명 (기본 gpt-4o-mini)" style="width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--fg); font:inherit">
+          <div class="quick">
+            <button class="btn btn--secondary" id="q-sync" style="color:var(--accent-text)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>지금 동기화</button>
+            <button class="btn btn--ghost" id="q-events"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>일정 제안</button>
+            <button class="btn btn--ghost" id="q-ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>질문</button>
+          </div>
         </div>
-        <div style="margin-top:8px; display:flex; gap:6px">
-          <button id="ai-save" style="background:transparent; color:var(--accent); border:1px solid var(--line)">선택 저장</button>
-          <button id="ai-download">모델 받기</button>
+        <div class="grid2" style="margin-top:20px">
+          <div>
+            <div class="sec__hd"><span class="label">다가오는 마감 (2주)</span></div>
+            <div class="card card--flush" id="home-tasks"><div class="empty"><div class="spinner"></div></div></div>
+          </div>
+          <div>
+            <div class="sec__hd"><span class="label">시험 · 휴강</span><button class="link" id="home-more-events">모두 보기</button></div>
+            <div class="card card--flush" id="home-events"></div>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div style="text-align:center; margin-top:14px">
-        <button id="wz-done" disabled>시작하기</button>
-      </div>
-      <div class="muted" id="wz-status" style="font-size:12px; text-align:center; margin-top:8px"></div>
-    </div>
+      <!-- 질문(AI 대화) -->
+      <section class="pane pane--chat" data-pane="ai">
+        <div class="chat__scroll" id="chat-scroll">
+          <div class="chat" id="chat-log">
+            <div class="empty" id="chat-empty" style="margin:auto"><div class="empty__title">무엇이든 물어보세요</div><div class="empty__sub">드라이브 요약·과제·일정을 근거로 답합니다. 예: "이번 주 과제 뭐 있어?", "중간고사 일정 정리해줘"</div></div>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="composer__row"><input class="composer__in" id="chat-input" placeholder="질문을 입력하세요 (Enter로 보내기)"><button class="btn btn--primary composer__send" id="chat-send" aria-label="보내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg></button></div>
+            <div class="composer__tools">
+              <select class="select" id="chat-model" title="모델 선택"></select>
+              <div class="seg" id="chat-effort" title="노력: 로컬 모델은 답변 길이 상한, 외부 추론 모델은 reasoning_effort"><button data-v="low">빠르게</button><button data-v="medium" class="on">보통</button><button data-v="high">꼼꼼히</button></div>
+              <span class="caption" id="chat-model-note"></span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-    <!-- 시작 -->
-    <div class="card" id="screen-idle">
-      <div class="title">KAISTBOT</div>
-      <div class="muted" id="idle-sub">아이디는 저장돼 있습니다. 로그인하면 폰 승인만 하면 됩니다.</div>
-      <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
-        <button id="btn-sync-idle">지금 동기화</button>
-        <button id="btn-login" style="background:transparent; color:var(--accent); border:1px solid var(--line);">로그인</button>
-      </div>
-      <div style="margin-top:10px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-        <button id="btn-chat" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">AI에게 묻기</button>
-        <button id="btn-suggest" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">AI 일정 제안</button>
-        <button id="btn-setup" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">설정</button>
-      </div>
-    </div>
+      <!-- 일정 -->
+      <section class="pane pane--narrow" data-pane="events">
+        <div class="card">
+          <div class="h2">AI 일정 제안</div>
+          <div class="caption" style="margin-top:4px">공지에서 시험·휴강·온라인·보강을 뽑아 보여줍니다. 각 제안을 <b>승인</b>하면 캘린더에 들어가고, <b>거절</b>하면 다시 묻지 않습니다. 자동 등록은 없습니다.</div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn btn--primary" id="sg-run">새 공지 분석</button>
+            <button class="btn btn--secondary" id="sg-preview">처리 안 한 후보 전부</button>
+          </div>
+        </div>
+        <div class="sec"><div id="sg-list"></div></div>
+        <div class="sec">
+          <div class="sec__hd"><span class="label">등록된 일정 (오늘 이후)</span><button class="link" id="ev-refresh">새로고침</button></div>
+          <div class="card card--flush" id="ev-list"></div>
+        </div>
+      </section>
 
-    <!-- AI 일정 제안 -->
-    <div class="card hidden" id="screen-suggest" style="text-align:left">
-      <div class="title" style="text-align:center">AI 일정 제안</div>
-      <div class="muted" style="text-align:center; font-size:12px; margin-bottom:8px">공지에서 시험·휴강 등을 뽑아 보여줍니다. <b>확인 후 등록</b>합니다(자동 등록 아님).</div>
-      <div id="suggest-list" style="max-height:320px; overflow:auto; font-size:13px"></div>
-      <div style="text-align:center; margin-top:12px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-        <button id="suggest-run">공지 분석</button>
-        <button id="suggest-preview" style="background:transparent; color:var(--accent); border:1px solid var(--line)">미리보기(전체)</button>
-        <button id="suggest-back" style="background:transparent; color:var(--sub); border:1px solid var(--line)">← 돌아가기</button>
-      </div>
-    </div>
+      <!-- 동기화 -->
+      <section class="pane pane--narrow" data-pane="sync">
+        <div id="sync-banner"></div>
+        <div class="card">
+          <div class="h2">동기화</div>
+          <div class="caption" style="margin-top:4px">KLMS·포털·생활관에서 수집하고 드라이브·캘린더를 갱신합니다. 세션이 살아 있으면 폰 승인 없이 끝납니다.</div>
+          <div style="margin-top:12px"><button class="btn btn--primary" id="sync-go">지금 동기화</button></div>
+          <div id="sync-progress" style="margin-top:12px;display:none"><div class="progress"><div class="progress__bar"></div></div><div class="caption" id="sync-step" style="margin-top:6px"></div></div>
+        </div>
+        <div class="sec" id="sync-result-wrap" style="display:none">
+          <div class="sec__hd"><span class="label">마지막 결과</span></div>
+          <div class="card" id="sync-result"></div>
+        </div>
+      </section>
 
-    <!-- 대화 -->
-    <div class="card hidden" id="screen-chat" style="text-align:left">
-      <div class="title" style="text-align:center">AI에게 묻기</div>
-      <div class="muted" style="text-align:center; font-size:12px; margin-bottom:8px">드라이브 요약·과제·일정을 근거로 답합니다.</div>
-      <div id="chat-log" style="max-height:300px; overflow:auto; font-size:13px; line-height:1.5"></div>
-      <div style="display:flex; gap:6px; margin-top:10px">
-        <input id="chat-input" placeholder="예: 이번 주 과제 뭐 있어?" style="flex:1; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:inherit">
-        <button id="chat-send">보내기</button>
-      </div>
-      <div style="text-align:center; margin-top:10px"><button id="chat-back" style="background:transparent; color:var(--sub); border:0; font-size:12px; cursor:pointer; text-decoration:underline;">← 돌아가기</button></div>
-    </div>
-    <!-- 로그인 중 -->
-    <div class="card hidden" id="screen-progress">
-      <div class="spinner"></div>
-      <div class="title">로그인 중…</div>
-      <div class="muted" id="progress-sub">학교 사이트에 연결하고 있습니다.</div>
-    </div>
-    <!-- 폰 승인 -->
-    <div class="card hidden" id="screen-approve">
-      <div class="title">📱 폰에서 승인해 주세요</div>
-      <div class="muted">KAIST 인증 앱에서 아래 번호를 선택해 승인하세요.</div>
-      <div class="big-num" id="auth-num">–</div>
-      <div class="muted">승인하면 자동으로 다음으로 넘어갑니다.</div>
-    </div>
-    <!-- 완료 / 홈 -->
-    <div class="card hidden" id="screen-done">
-      <div class="title ok">✓ 로그인됨</div>
-      <div class="muted" id="done-sub"></div>
-      <div class="sites" id="done-sites"></div>
-      <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
-        <button id="btn-sync">지금 동기화</button>
-        <button id="btn-again" style="background:transparent; color:var(--accent); border:1px solid var(--line);">다시 로그인</button>
-      </div>
-      <div id="sync-result" class="sites" style="margin-top:14px; white-space:pre-wrap;"></div>
-    </div>
+      <!-- 설정 -->
+      <section class="pane pane--narrow" data-pane="settings">
+        <div class="steps"><i data-step="0" class="on"></i><i data-step="1"></i><i data-step="2"></i><i data-step="3"></i></div>
+        <div class="step on" data-step="0">
+          <div class="card">
+            <div class="h2">1. 학교 계정 <span class="badge badge--neutral" id="st-account"></span></div>
+            <div class="caption" style="margin-top:6px">로그인 창에서 아이디를 한 번 입력하면 저장됩니다. 비밀번호는 저장하지 않고, 다음부터는 폰 승인만 합니다.</div>
+            <div style="margin-top:12px"><button class="btn btn--primary" id="wz-login">로그인하고 아이디 저장</button></div>
+            <div class="hint" id="wz-hint-0"></div>
+          </div>
+        </div>
+        <div class="step" data-step="1">
+          <div class="card">
+            <div class="h2">2. 드라이브 폴더 <span class="badge badge--neutral" id="st-drive"></span></div>
+            <div class="caption" style="margin-top:6px">자료를 저장할 폴더. 구글 드라이브 동기화 폴더 안을 추천합니다(폰에서도 보이게).</div>
+            <div class="caption" id="wz-drive-path" style="margin-top:8px;word-break:break-all;color:var(--text-secondary)"></div>
+            <div style="margin-top:12px"><button class="btn btn--secondary" id="wz-drive">폴더 선택</button></div>
+            <div class="hint" id="wz-hint-1"></div>
+          </div>
+        </div>
+        <div class="step" data-step="2">
+          <div class="card">
+            <div class="h2">3. 구글 연결 <span class="badge badge--neutral" id="st-google"></span></div>
+            <div class="caption" style="margin-top:6px">마감·시험을 구글 "KLMS" 캘린더에 올립니다. "확인되지 않은 앱" 경고가 뜨면 고급 → 이동.</div>
+            <label class="caption" style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer"><input type="checkbox" id="wz-gmail"> 학교 메일(Gmail)도 가져오기</label>
+            <div style="margin-top:12px"><button class="btn btn--primary" id="wz-google">구글 승인</button></div>
+            <div class="hint" id="wz-hint-2"></div>
+          </div>
+        </div>
+        <div class="step" data-step="3">
+          <div class="card">
+            <div class="h2">4. AI 모델 <span class="badge badge--neutral" id="st-ai"></span></div>
+            <div class="caption" style="margin-top:6px;margin-bottom:10px">대화·일정 제안에 쓸 모델. 로컬은 내려받아 오프라인으로 돌아갑니다. 질문 화면에서도 바꿀 수 있어요.</div>
+            <div id="ai-models"></div>
+            <div class="radio-card" id="ai-ext-card" data-uri="__ext__"><span class="radio-dot"></span><div style="flex:1;min-width:0"><b>외부 AI (자기 API 키)</b><div class="caption">GPT·Claude·Gemini. 질문 내용이 그 서비스로 전송됩니다.</div>
+              <div id="ai-ext-fields" style="display:none;margin-top:8px">
+                <div class="presets"><button class="btn btn--sm btn--secondary ai-preset" data-base="https://api.openai.com/v1" data-model="gpt-6-luna">GPT</button><button class="btn btn--sm btn--secondary ai-preset" data-base="https://api.anthropic.com/v1" data-model="claude-haiku-5-5">Claude</button><button class="btn btn--sm btn--secondary ai-preset" data-base="https://generativelanguage.googleapis.com/v1beta/openai" data-model="gemini-2.5-flash-lite">Gemini</button></div>
+                <div class="field"><input class="input" id="ai-key" placeholder="API 키"></div>
+                <div class="field"><input class="input" id="ai-base" placeholder="Base URL"></div>
+                <div class="field"><input class="input" id="ai-model" placeholder="모델명"></div>
+              </div></div></div>
+            <div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn--secondary" id="ai-save">선택 저장</button><button class="btn btn--primary" id="ai-download">모델 받기</button></div>
+            <div class="hint" id="wz-hint-3"></div>
+          </div>
+        </div>
+        <div class="wiz-nav"><button class="btn btn--ghost" id="wz-prev">← 이전</button><button class="btn btn--primary" id="wz-next">다음 →</button></div>
+        <div class="sec">
+          <div class="sec__hd"><span class="label">앱 정보</span></div>
+          <div class="card">
+            <div class="status-line"><span class="caption" id="app-ver2" style="color:var(--text-secondary)">–</span><button class="btn btn--secondary btn--sm" id="app-update-btn">업데이트 확인</button></div>
+            <div class="hint" id="app-update-hint">새 버전은 시작할 때와 6시간마다 자동으로 확인합니다.</div>
+          </div>
+        </div>
+      </section>
+    </main>
 
-    <!-- 동기화 중 -->
-    <div class="card hidden" id="screen-sync">
-      <div class="spinner"></div>
-      <div class="title">동기화 중…</div>
-      <div class="muted" id="sync-sub">KLMS·포털·생활관에서 수집하고 드라이브에 저장합니다.</div>
+    <!-- 로그인/승인 오버레이 -->
+    <div class="overlay" id="auth">
+      <div class="auth">
+        <svg class="auth__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        <div class="h1" id="auth-title">로그인 중…</div>
+        <div class="caption" id="auth-sub">학교 사이트에 연결하고 있습니다.</div>
+        <div class="auth__num" id="auth-num" aria-live="polite" style="display:none">–</div>
+        <div class="auth__wait" id="auth-wait"><div class="spinner"></div><span id="auth-wait-text">잠시만요</span></div>
+        <div style="margin-top:6px"><button class="btn btn--ghost" id="auth-close" style="display:none">닫기</button></div>
+      </div>
     </div>
-    <!-- 실패 -->
-    <div class="card hidden" id="screen-fail">
-      <div class="title err">로그인 실패</div>
-      <div class="muted" id="fail-sub"></div>
-      <div style="margin-top:16px"><button id="btn-retry">다시 시도</button></div>
-    </div>
-  </main>
-  <script src="renderer.js"></script>
+  </div>
+</div>
+<script src="renderer.js"></script>
 </body>
 </html>
