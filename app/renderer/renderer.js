@@ -369,6 +369,13 @@ async function refreshWizard() {
   if (!st.driveRootExists && !$('wz-hint-1').textContent) hint(1, '이 폴더의 상위가 없습니다(구글 드라이브 미설치?). 동기화는 되지만 파일·요약 저장은 건너뜁니다. "폴더 선택" 또는 "PC 폴더 쓰기"를 눌러 주세요.');
   badge('st-google', st.hasGoogleToken, st.hasGoogleToken ? ('연결됨' + (st.hasGmail ? ' · 메일' : '')) : '필요');
   if (st.hasGmail) $('wz-gmail').checked = true;
+  // 이 빌드에 구글 OAuth 클라이언트가 없으면(v1.0.0~1.2.0 설치 파일) 승인 자체가 불가능하다. 버튼을 막고 이유를 보여준다.
+  if (st.hasGoogleClient === false && !st.hasGoogleToken) {
+    $('wz-google').disabled = true;
+    hint(2, '이 설치 파일에는 구글 연결 정보가 들어 있지 않습니다. 최신 설치 파일로 다시 설치해 주세요(위 "새 버전" 또는 홈페이지).');
+  } else {
+    $('wz-google').disabled = false;
+  }
   return st;
 }
 function selectAi(uri) {
