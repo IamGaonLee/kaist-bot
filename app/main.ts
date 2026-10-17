@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { installElectronPlatform } from './platform-electron.js';
 import { getSavedId } from '../src/sso/account.js';
-import { hasGoogleToken, hasGmailScope, googleLogin } from '../src/google/oauth.js';
+import { hasGoogleToken, hasGmailScope, hasGoogleClient, googleLogin, setBundledGoogleClientFile } from '../src/google/oauth.js';
 import { loadSettings, saveSettings } from '../src/config.js';
 import { getMeta } from '../src/store/db.js';
 import { checkForUpdate, type UpdateInfo } from './update-check.js';
@@ -15,6 +15,9 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'KAISTBOT';
 
 installElectronPlatform();
+// 설치 파일에 포함된 공유 구글 OAuth 클라이언트(릴리스 CI가 dist-electron/google-client.json으로 넣는다, docs/publish.md 5절).
+// 사용자 자기 클라이언트(%LOCALAPPDATA%\kaist-cli\google-client.json)가 있으면 그쪽이 우선.
+setBundledGoogleClientFile(path.join(dir, '..', 'google-client.json'));
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -176,6 +179,8 @@ ipcMain.handle('setup:state', () => ({
   hasSavedId: !!getSavedId(),
   hasGoogleToken: hasGoogleToken(),
   hasGmail: hasGmailScope(),
+  // false면 이 빌드에 OAuth 클라이언트가 없어 "구글 승인"이 될 수 없다(렌더러가 버튼을 막고 안내)
+  hasGoogleClient: hasGoogleClient(),
   driveRoot: loadSettings().driveRoot,
   driveRootExists: (() => { try { return fs.existsSync(path.dirname(loadSettings().driveRoot)); } catch { return false; } })(),
 }));

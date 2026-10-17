@@ -17,8 +17,27 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - name: 공유 구글 OAuth 클라이언트 만들기 (저장소 시크릿 GOOGLE_OAUTH_CLIENT_JSON → app/google-client.json)
+        # 설치 파일 안에 들어간다(docs/publish.md 5절). 시크릿이 없으면 구글 연결이 안 되는 설치 파일이 되므로 여기서 멈춘다.
+        shell: pwsh
+        env:
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+        run: |
+          if (-not $env:GOOGLE_OAUTH_CLIENT_JSON) { Write-Error 'GOOGLE_OAUTH_CLIENT_JSON 시크릿이 없습니다. 저장소 Settings > Secrets and variables > Actions에 데스크톱 앱 클라이언트 JSON 내용을 넣어 주세요.'; exit 1 }
+          $j = $env:GOOGLE_OAUTH_CLIENT_JSON | ConvertFrom-Json
+          $c = if ($j.installed) { $j.installed } else { $j.web }
+          if (-not $c.client_id -or -not $c.client_secret) { Write-Error '시크릿이 데스크톱 앱 클라이언트 JSON 형식(installed.client_id/client_secret)이 아닙니다.'; exit 1 }
+          [IO.File]::WriteAllText("$PWD\app\google-client.json", $env:GOOGLE_OAUTH_CLIENT_JSON, (New-Object Text.UTF8Encoding $false))
+          Write-Host 'google-client.json 준비됨'
       - run: npm run build:app
       - run: npx electron-builder --win nsis --publish never
+      - name: 설치 파일에 구글 OAuth 클라이언트가 들어갔는지 확인
+        # v1.0.0~1.2.0은 이 파일이 빠져 다른 PC에서 "구글 승인"이 안 됐다. 없으면 릴리스를 올리지 않는다.
+        shell: pwsh
+        run: |
+          $list = npx @electron/asar list release/win-unpacked/resources/app.asar
+          if (-not ($list | Select-String -SimpleMatch '/google-client.json')) { Write-Error 'app.asar에 google-client.json이 없습니다'; exit 1 }
+          Write-Host 'google-client.json 포함 확인'
       - name: Release
         uses: softprops/action-gh-release@v2
         with:

@@ -17,14 +17,41 @@ const tokenFile = path.join(paths.home, 'google-token.json');
 interface Client { client_id: string; client_secret: string }
 interface Token { access_token: string; refresh_token: string; expires_at: number; scope: string }
 
-function loadClient(): Client {
-  if (!fs.existsSync(clientFile)) {
-    throw new KaistError('GOOGLE_NO_CLIENT', `OAuth 클라이언트 파일이 없습니다: ${clientFile}. 구글 클라우드에서 데스크톱 앱 클라이언트 JSON을 받아 이 위치에 저장해 주세요.`);
-  }
-  const j = JSON.parse(fs.readFileSync(clientFile, 'utf8').replace(/^﻿/, '')) as { installed?: Client; web?: Client };
+/** 앱 빌드에 포함된 공유 OAuth 클라이언트(설치 파일 안). app/main.ts가 등록한다. CLI(개발 PC)는 사용자 파일만 쓴다. */
+let bundledClientFile: string | null = null;
+export function setBundledGoogleClientFile(file: string): void { bundledClientFile = file; }
+
+/** 데스크톱 앱 클라이언트 JSON(installed 또는 web) 해석 */
+export function parseGoogleClient(text: string): Client {
+  let j: { installed?: Client; web?: Client };
+  try { j = JSON.parse(text.replace(/^﻿/, '')) as typeof j; }
+  catch { throw new KaistError('GOOGLE_BAD_CLIENT', 'OAuth 클라이언트 파일이 JSON이 아닙니다 (데스크톱 앱 JSON이어야 함).'); }
   const c = j.installed ?? j.web;
   if (!c?.client_id || !c.client_secret) throw new KaistError('GOOGLE_BAD_CLIENT', 'OAuth 클라이언트 파일 형식이 맞지 않습니다 (데스크톱 앱 JSON이어야 함).');
-  return c;
+  return { client_id: c.client_id, client_secret: c.client_secret };
+}
+
+export type GoogleClientSource = 'user' | 'env' | 'bundled';
+
+/** 쓸 클라이언트 파일. 우선순위: 사용자 자기 클라이언트(%LOCALAPPDATA%\kaist-cli\google-client.json) → KAIST_GOOGLE_CLIENT 환경변수 경로 → 빌드에 포함된 공유 클라이언트 */
+export function googleClientFile(): { file: string; source: GoogleClientSource } | null {
+  if (fs.existsSync(clientFile)) return { file: clientFile, source: 'user' };
+  const env = process.env.KAIST_GOOGLE_CLIENT;
+  if (env && fs.existsSync(env)) return { file: env, source: 'env' };
+  if (bundledClientFile && fs.existsSync(bundledClientFile)) return { file: bundledClientFile, source: 'bundled' };
+  return null;
+}
+export const hasGoogleClient = (): boolean => googleClientFile() !== null;
+
+function loadClient(): Client {
+  const found = googleClientFile();
+  if (!found) {
+    // 앱(번들 경로가 등록됨)인데 파일이 없으면 빌드에 클라이언트가 안 들어간 것. v1.0.0~1.2.0 설치 파일이 그랬다.
+    throw new KaistError('GOOGLE_NO_CLIENT', bundledClientFile
+      ? `이 설치 파일에는 구글 연결 정보(OAuth 클라이언트)가 들어 있지 않습니다. 최신 설치 파일로 다시 설치하거나, 구글 클라우드에서 데스크톱 앱 클라이언트 JSON을 받아 ${clientFile}에 저장해 주세요.`
+      : `OAuth 클라이언트 파일이 없습니다: ${clientFile}. 구글 클라우드에서 데스크톱 앱 클라이언트 JSON을 받아 이 위치에 저장해 주세요.`);
+  }
+  return parseGoogleClient(fs.readFileSync(found.file, 'utf8'));
 }
 
 const loadToken = (): Token | null => (fs.existsSync(tokenFile) ? JSON.parse(fs.readFileSync(tokenFile, 'utf8')) as Token : null);

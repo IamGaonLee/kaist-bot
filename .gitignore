@@ -5,3 +5,6 @@ dist/
 scripts/local/
 dist-electron/
 release/
+
+# 공유 구글 OAuth 클라이언트 (릴리스 CI가 시크릿으로 만든다. 커밋 금지)
+app/google-client.json
