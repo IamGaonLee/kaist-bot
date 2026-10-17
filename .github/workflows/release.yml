@@ -36,7 +36,8 @@ jobs:
         shell: pwsh
         run: |
           $list = npx @electron/asar list release/win-unpacked/resources/app.asar
-          if (-not ($list | Select-String -SimpleMatch '/google-client.json')) { Write-Error 'app.asar에 google-client.json이 없습니다'; exit 1 }
+          # Windows 러너의 asar list는 경로를 역슬래시(\google-client.json)로 찍는다
+          if (-not ($list | Select-String -Pattern '[\\/]google-client\.json$')) { Write-Error 'app.asar에 google-client.json이 없습니다'; exit 1 }
           Write-Host 'google-client.json 포함 확인'
       - name: Release
         uses: softprops/action-gh-release@v2
