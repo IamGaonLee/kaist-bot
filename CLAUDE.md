@@ -26,6 +26,7 @@ KAIST KLMS(Moodle 3.9 커스텀)의 과제, 공지, 강의자료를 수집합니
 - **v1.1.0 (2026-10-16, feature/ai-events→main):** AI 일정 제안(`kaist suggest`, 앱 "일정" 건별 승인·거절·취소), 앱 UI 개편(사이드바 레이아웃 1100×720, 홈 대시보드 `home:state`, 로그인 오버레이), 새 버전 감지(`app/update-check.ts`, GitHub 릴리스 latest, 자동 설치 없음), 질문 화면 모델·노력 선택(`aiUseExternal`·`aiEffort`), 외부 AI 호환층 400 자동 보정(`src/ai/openai.ts`, 프리셋 gpt-6-luna·claude-haiku-5-5·gemini-2.5-flash-lite), 설명서 외부 AI·팁 절, 모바일 검토 `docs/mobile-feasibility.md`(권고: 지금은 안 만듦)
 - **v1.2.0 (2026-10-16, feature/chatgpt-login→main):** Continue with ChatGPT — OpenAI 공식 "Sign in with ChatGPT"(오픈소스·로컬 앱용 플랜 사용)로 API 키 없이 Plus/Pro 플랜으로 내장 AI 사용. `src/ai/chatgpt-auth.ts`(PKCE+127.0.0.1 루프백 `/auth/callback`, 동적 client 등록, 회전 refresh), `src/ai/chatgpt.ts`(Responses API 스트리밍, store:false, 한도 오류 매핑), 설정 `aiSource`(local|key|chatgpt)·`aiChatgptModel`, CLI `kaist chatgpt login|status|logout`, 앱 설정 카드·질문 드롭다운. **Claude는 약관(code.claude.com legal-and-compliance)이 제3자 앱 계정 로그인을 금지해 API 키만**. MIT LICENSE 추가(오픈소스 조건). 설정 화면은 마법사(이전/다음) 대신 전부 펼침. 구글 드라이브 데스크톱 없이도 동작(설정 "PC 폴더 쓰기", `summary` DRIVE_MISSING). 버그 수정: `loadSettings`가 driveRoot만 돌려줘 v1.0.0~1.1.0에서 AI 키·모델·노력 설정이 무시되던 문제. 실측: 사용자 ChatGPT 계정으로 로그인·호출 성공(모델 gpt-6.1-sol 등 7개), host id는 `urn:uuid:` 형식이어야 함.
 - **v1.2.1 (2026-10-17, fix/google-client→main):** 다른 PC에서 "구글 승인"이 안 되던 문제 수정. 설치 파일에 구글 OAuth 클라이언트가 없었다(개발 PC의 `%LOCALAPPDATA%\kaist-cli\google-client.json`만 읽음). 공유 클라이언트는 GitHub 저장소 시크릿 `GOOGLE_OAUTH_CLIENT_JSON`(저장소 커밋은 푸시 보호가 거부) → release CI가 `app/google-client.json`(.gitignore)으로 쓰고 build:app이 `dist-electron/google-client.json`으로 복사(개발 PC는 `%LOCALAPPDATA%` 파일로 대체), `app/main.ts`가 번들 경로 등록(`setBundledGoogleClientFile`). 탐색 순서 사용자 파일 → `KAIST_GOOGLE_CLIENT` → 번들. 클라이언트 없는 빌드는 설정 화면이 버튼을 막고 안내, release CI가 시크릿 없으면 중단·app.asar 포함 여부 검사. 상세 `docs/publish.md` 5절.
+- **v1.2.2 (2026-11-04, fix/coursefile→main):** KLMS 전용 `coursefile` 모듈 강의자료를 받는다(기계요소설계 Chapter7이 빠져 있던 문제). `src/klms/coursefile.ts`가 view.php 303 리다이렉트에서 pluginfile 주소를 얻고, 불변식 1은 이 유형이 updates_since에 없는 것을 반영, 다운로드 계획은 매번 HEAD로 변경을 본다. KLMS 특이사항 참고.
 - 다음: 미정 (카카오톡 연결·웹 서버 방식·모바일 앱은 보류)
 
 ## 에이전트로 쓸 때 (학교생활 논의)
@@ -133,5 +134,6 @@ src/               CLI 본체 (S1부터)
 - 날짜는 Asia/Seoul 고정이고, "오전 12:00"은 00:00이다.
 - `core_course_get_updates_since`(since=0)는 courseboard를 돌려주지 않고, 종료된 간편설문(choice)도 빠질 수 있다. 불변식 1은 이를 반영했다(`src/sync/invariants.ts`).
 - 과제 페이지에는 제출 파일 링크(학번·이름 포함)가 함께 있다. 과제 첨부는 `mod_assign/introattachment` 링크만 쓴다.
+- 강의자료는 표준 `resource` 외에 KLMS 전용 `coursefile` 모듈로도 올라온다(2026-11-04, 기계요소설계 Chapter7). 과목 페이지에 downloadFile 링크가 없고 `mod/coursefile/view.php?id=`가 pluginfile로 303 리다이렉트하며, updates_since에도 안 나온다. `src/klms/coursefile.ts`가 주소를 얻고, 다운로드 계획은 매번 HEAD로 변경을 본다.
 - 캘린더는 `courseid: 1`(사이트 전체) 월별 조회로 모든 과목 마감이 한 번에 온다.
 - 과제 페이지나 게시글을 GET하면 KLMS에 조회 기록이 남는다. 그래서 사용자 결정에 따라 과제 페이지는 새 과제, 변경 알림이 온 과제, 마감 전 미제출 과제만 열고, 게시글은 새 글만 한 번 연다.

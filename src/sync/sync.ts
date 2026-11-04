@@ -18,6 +18,7 @@ import { parseArticle, parseBoardList } from '../klms/adapters/courseboard.js';
 import { fetchCalendarEvents, type CalendarEvent } from '../klms/calendar.js';
 import { fetchCurrentCourses, type Course } from '../klms/courses.js';
 import { ensureSession, type KlmsSession } from '../klms/session.js';
+import { resolveCoursefile } from '../klms/coursefile.js';
 import { saveCourses } from '../store/courses-cache.js';
 import { getMeta, openDb, setMeta, tx } from '../store/db.js';
 import { saveSnapshot, sha1 } from '../store/snapshots.js';
@@ -324,7 +325,18 @@ async function syncCourse(session: KlmsSession, course: Course, eventsByCmid: Ma
   const push = (c: Omit<Change, 'courseId'>) => result.changes.push({ courseId: course.id, ...c });
 
   // 섹션과 활동
-  const prevMods = new Map((db.prepare('select cmid, content_hash, updates_sig, removed_at from modules where course_id = ?').all(course.id) as { cmid: number; content_hash: string; updates_sig: string | null; removed_at: string | null }[]).map(r => [r.cmid, r]));
+  const prevMods = new Map((db.prepare('select cmid, content_hash, updates_sig, removed_at, file_url, file_name from modules where course_id = ?').all(course.id) as { cmid: number; content_hash: string; updates_sig: string | null; removed_at: string | null; file_url: string | null; file_name: string | null }[]).map(r => [r.cmid, r]));
+
+  // coursefile(KLMS 전용): 과목 페이지에 파일 링크가 없어 view.php 리다이렉트로 얻는다. 이전에 얻은 주소는 재사용하고(요청 절약),
+  // 그 주소로 받지 못했던 파일(missing/error)만 다시 얻는다. 내용 변경은 download 계획이 매번 HEAD로 본다 (headAlways)
+  const fileStatus = db.prepare('select status from files where key = ?');
+  for (const m of page.modules) {
+    if (m.modname !== 'coursefile' || m.file) continue;
+    const prev = prevMods.get(m.cmid);
+    const st = (fileStatus.get(`r:${m.cmid}`) as { status: string } | undefined)?.status;
+    if (prev?.file_url && prev.file_name && !prev.removed_at && (!st || st === 'ok' || st === 'viewer_only' || st === 'pending')) m.file = { url: prev.file_url, filename: prev.file_name };
+    else m.file = await resolveCoursefile(session, m.cmid);
+  }
   tx(() => {
     db.prepare('delete from sections where course_id = ?').run(course.id);
     const insSec = db.prepare('insert into sections(course_id, number, name, date_range, summary) values(?, ?, ?, ?, ?)');
