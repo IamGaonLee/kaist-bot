@@ -8,11 +8,11 @@ export class InvariantError extends KaistError {
   }
 }
 
-/** updates_since가 돌려주지 않는 활동 유형 (0단계/S2 확인: courseboard) */
-export const NOT_IN_UPDATES = new Set(['courseboard']);
+/** updates_since가 돌려주지 않는 활동 유형 (0단계/S2 확인: courseboard, 2026-11-04 확인: coursefile) */
+export const NOT_IN_UPDATES = new Set(['courseboard', 'coursefile']);
 
 /** 내용을 수집하는 활동 유형. 나머지(설문 등)는 "처리하지 못한 유형"으로 보고만 한다 */
-export const HANDLED = new Set(['resource', 'assign', 'quiz', 'courseboard', 'lti', 'url', 'label']);
+export const HANDLED = new Set(['resource', 'coursefile', 'assign', 'quiz', 'courseboard', 'lti', 'url', 'label']);
 
 export interface InvariantReport {
   ok: boolean;
@@ -46,7 +46,7 @@ export function checkCoursePage(page: ParsedCoursePage, updatesCmids: Set<number
       sections: page.sections.length,
       modules: page.modules.length,
       boards,
-      resources: page.modules.filter(m => m.modname === 'resource').length,
+      resources: page.modules.filter(m => m.modname === 'resource' || m.modname === 'coursefile').length,
       updatesModules: updatesCmids.size,
     },
   };

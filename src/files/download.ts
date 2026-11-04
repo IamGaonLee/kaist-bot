@@ -23,6 +23,8 @@ export interface FileCandidate {
   section: number | null;
   updatesSig: string | null;
   target: string;
+  /** coursefile: updates_since에 안 나와 변경 신호가 없으므로 매번 HEAD로 비교한다 */
+  headAlways?: boolean;
 }
 
 interface FileRow {
@@ -50,11 +52,12 @@ export function collectCandidates(root: string, semesterLabel: string, courseIds
     const cdir = courseDir(root, semesterLabel, c);
     const sections = new Map((db.prepare('select number, name from sections where course_id = ?').all(cid) as { number: number; name: string }[]).map(s => [s.number, s.name]));
 
-    const res = db.prepare(`select cmid, section, file_url, file_name, updates_sig from modules
-      where course_id = ? and modname = 'resource' and removed_at is null and file_url is not null order by section, cmid`).all(cid) as { cmid: number; section: number; file_url: string; file_name: string; updates_sig: string | null }[];
+    // resource(표준)와 coursefile(KLMS 전용, src/klms/coursefile.ts) 둘 다 강의자료로 받는다
+    const res = db.prepare(`select cmid, section, modname, file_url, file_name, updates_sig from modules
+      where course_id = ? and modname in ('resource', 'coursefile') and removed_at is null and file_url is not null order by section, cmid`).all(cid) as { cmid: number; section: number; modname: string; file_url: string; file_name: string; updates_sig: string | null }[];
     for (const r of res) {
       out.push({ key: `r:${r.cmid}`, courseId: cid, source: 'resource', ref: r.cmid, url: r.file_url, filename: r.file_name, section: r.section, updatesSig: r.updates_sig,
-        target: materialPath(cdir, sections.get(r.section) ?? `섹션 ${r.section}`, r.file_name) });
+        headAlways: r.modname === 'coursefile', target: materialPath(cdir, sections.get(r.section) ?? `섹션 ${r.section}`, r.file_name) });
     }
     const tasks = db.prepare(`select t.cmid, t.name, t.attachments_json from tasks t join modules m on m.cmid = t.cmid
       where t.course_id = ? and m.removed_at is null and t.attachments_json is not null`).all(cid) as { cmid: number; name: string; attachments_json: string }[];
@@ -122,6 +125,7 @@ export async function planFiles(session: KlmsSession, cands: FileCandidate[]): P
     const base = { cand, prevStatus: row?.status ?? null, localPath };
     const signal = !row || row.url !== cand.url || ['error', 'missing', 'pending'].includes(row.status)
       || (cand.source === 'resource' && row.updates_sig !== cand.updatesSig)
+      || (cand.headAlways && row.status !== 'viewer_only')
       || !localPath && row.status !== 'viewer_only';
     if (!signal) { plan.push({ ...base, head: null, action: 'skip', reason: row.status === 'viewer_only' ? '뷰어 전용 (이전 확인)' : '변경 신호 없음' }); continue; }
     if (row?.status === 'pending' && !localPath && row.updates_sig === cand.updatesSig && row.url === cand.url && (row.etag || row.length)) {

@@ -133,5 +133,6 @@ src/               CLI 본체 (S1부터)
 - 날짜는 Asia/Seoul 고정이고, "오전 12:00"은 00:00이다.
 - `core_course_get_updates_since`(since=0)는 courseboard를 돌려주지 않고, 종료된 간편설문(choice)도 빠질 수 있다. 불변식 1은 이를 반영했다(`src/sync/invariants.ts`).
 - 과제 페이지에는 제출 파일 링크(학번·이름 포함)가 함께 있다. 과제 첨부는 `mod_assign/introattachment` 링크만 쓴다.
+- 강의자료는 표준 `resource` 외에 KLMS 전용 `coursefile` 모듈로도 올라온다(2026-11-04, 기계요소설계 Chapter7). 과목 페이지에 downloadFile 링크가 없고 `mod/coursefile/view.php?id=`가 pluginfile로 303 리다이렉트하며, updates_since에도 안 나온다. `src/klms/coursefile.ts`가 주소를 얻고, 다운로드 계획은 매번 HEAD로 변경을 본다.
 - 캘린더는 `courseid: 1`(사이트 전체) 월별 조회로 모든 과목 마감이 한 번에 온다.
 - 과제 페이지나 게시글을 GET하면 KLMS에 조회 기록이 남는다. 그래서 사용자 결정에 따라 과제 페이지는 새 과제, 변경 알림이 온 과제, 마감 전 미제출 과제만 열고, 게시글은 새 글만 한 번 연다.

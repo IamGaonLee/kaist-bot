@@ -136,7 +136,7 @@ export function writeMarkdown(root: string, semesterLabel: string, courseIds: nu
       L.push(`### ${s.name}${s.date_range ? ` (${s.date_range})` : ''}`, '');
       if (s.summary) L.push(s.summary, '');
       for (const m of ms) {
-        if (m.modname === 'resource') {
+        if (m.modname === 'resource' || m.modname === 'coursefile') {
           const f = files.get(`r:${m.cmid}`);
           L.push(f?.local_path && fs.existsSync(f.local_path) ? `- 자료: [${m.name}](${rel(cdir, f.local_path)})`
             : f?.status === 'viewer_only' ? `- 자료: ${m.name} (뷰어 전용, KLMS에서 보기: ${m.url ?? ''})` : `- 자료: ${m.name} (아직 받지 않음)`);
