@@ -96,6 +96,8 @@ export async function pushDeadlines(lastSync: string): Promise<PushResult> {
     }
     const want = eventFor(t, lastSync);
     if (!have) {
+      // KLMS에서 사라진 과제는 새로 만들지 않는다 (사용자가 "[KLMS에서 사라짐]" 일정을 지운 뒤 다음 sync가 되살리던 문제, 2026-11-09)
+      if (t.removed_at) continue;
       if (t.needs_review) { res.skippedReview.push(want.summary); continue; }
       const ev = await gcal.insertEvent(calId, want);
       res.created.push(ev.summary);

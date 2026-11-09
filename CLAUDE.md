@@ -91,6 +91,7 @@ src/               CLI 본체 (S1부터)
   - `kaist ask <질문> [--course X]`: 로컬 자료(드라이브 요약·과제·일정) 근거로 내장 AI가 답. `kaist ai <프롬프트>`: 자료 없이 그냥 AI. 공급자는 설정 `aiSource`(local 기본 / key=`aiApiKey` / chatgpt=`kaist chatgpt login`).
   - `kaist doctor [과목] [--offline]`: 불변식 검사 (DB 변경 없음)
   - `kaist sync`는 파일도 받는다 (`--no-files`로 생략). 첫 전체 다운로드는 `--confirm-download`로 한 번 승인(완료됨). `kaist files [--new]`
+- 숨은 내용 검사(사용자 지시 2026-11-09): sync 뒤 `node scripts/scan-hidden.mjs`(기본 마지막 회차 파일, `--all`·`--since <ISO>`)로 받은 파일의 비가시 유니코드·PDF 숨은/흰색/극소 텍스트·극소 이미지·docx/pptx 숨김 서식·AI 지시문 의심 문장을 찾아 보고한다. 색 배경 위 흰 글자·OCR 레이어는 참고(info)로만 표시. 첫 전수 검사(134개) 결과 의심 항목 없음
 - 자동 sync: 작업 스케줄러 `KAIST daily sync`(매일 07:00, 놓치면 로그온 뒤 실행)가 `scripts/daily-sync.ps1`로 `sync --no-login`을 돌린다. 세션 만료·실패·새 변경은 Windows 알림, 요약 숫자만 `%LOCALAPPDATA%\kaist-cli\logs\daily-YYYYMM.log`. 등록·변경 `scripts/register-daily-sync.ps1 [-At HH:MM]`. ps1은 UTF-8 BOM으로 저장해야 한다(PS 5.1)
 - 로컬 데이터: `%LOCALAPPDATA%\kaist-cli\kaist.db`(SQLite), `snapshots\`(최근 HTML 원문), `staging\`(다운로드 임시), `config.json`(선택: `driveRoot`)
 - 드라이브: `G:\내 드라이브\KAIST\2026-가을\<코드> <과목명>\{강의자료\<주차>, 과제\<이름>, 게시판첨부\<날짜 제목>}`, 바뀐 파일의 이전 버전은 같은 폴더 `_이전버전\`. 요약은 `_요약.md`/`_과목정보.md`/`_학교메일.md`(Claude용)와 같은 이름의 `.pdf`(사람용, sync마다 재생성). 메일은 과목 메일→각 `_과목정보`, 나에게 온 메일(자동 알림 제외)→`_학교메일`, 학교 전체 메일은 제목만(사용자 결정)
